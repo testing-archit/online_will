@@ -1,0 +1,129 @@
+{
+  "executors": {
+    "path": "executorsGuardians.executors",
+    "step": "executors",
+    "noun": "executor",
+    "identity": "fullName",
+    "fields": {
+      "fullName": { "kind": "text", "label": "Full name" },
+      "relationship": { "kind": "text", "label": "Relationship to the person" },
+      "age": { "kind": "text", "label": "Age" },
+      "address": { "kind": "text", "label": "Address" },
+      "isAlternate": { "kind": "yes-no", "label": "Is an alternate (backup) executor" }
+    }
+  },
+  "children": {
+    "path": "executorsGuardians.children",
+    "step": "executors",
+    "noun": "child",
+    "identity": "fullName",
+    "requires": { "path": "executorsGuardians.hasChildren", "value": true, "because": "Record that they have children first (field executorsGuardians.hasChildren)." },
+    "fields": {
+      "fullName": { "kind": "text", "label": "Full name" },
+      "age": { "kind": "text", "label": "Age" }
+    }
+  },
+  "guardians": {
+    "path": "executorsGuardians.guardians",
+    "step": "executors",
+    "noun": "guardian",
+    "identity": "fullName",
+    "requires": { "path": "executorsGuardians.hasMinorChildren", "value": true, "because": "Guardians are only for minor children: record that they have minor children first (field executorsGuardians.hasMinorChildren)." },
+    "fields": {
+      "fullName": { "kind": "text", "label": "Full name" },
+      "relationship": { "kind": "text", "label": "Relationship to the child(ren)" },
+      "age": { "kind": "text", "label": "Age" },
+      "address": { "kind": "text", "label": "Address" },
+      "isAlternate": { "kind": "yes-no", "label": "Is an alternate (backup) guardian" },
+      "financialInstructions": { "kind": "text", "label": "Financial instructions for this guardian" }
+    }
+  },
+  "immovableAssets": {
+    "path": "assets.immovableAssets",
+    "step": "assets",
+    "noun": "property",
+    "identity": "address",
+    "fields": {
+      "address": { "kind": "text", "label": "Address or description of the property" },
+      "surveyNumber": { "kind": "text", "label": "Survey / khasra / plot number" },
+      "registryDetails": { "kind": "text", "label": "Registry details" },
+      "ownershipShare": { "kind": "text", "label": "Ownership share, for example 100%" },
+      "estimatedValue": { "kind": "text", "label": "Approximate value" }
+    }
+  },
+  "bankAccounts": {
+    "path": "assets.bankAccounts",
+    "step": "assets",
+    "noun": "bank account",
+    "identity": "bankName",
+    "fields": {
+      "bankName": { "kind": "text", "label": "Bank name" },
+      "branch": { "kind": "text", "label": "Branch" },
+      "accountNumber": { "kind": "text", "label": "Account number" },
+      "estimatedValue": { "kind": "text", "label": "Approximate balance" },
+      "nomineeName": { "kind": "text", "label": "Nominee" }
+    }
+  },
+  "investments": {
+    "path": "assets.investments",
+    "step": "assets",
+    "noun": "investment",
+    "identity": "description",
+    "fields": {
+      "type": { "kind": "text", "label": "Type, for example mutual fund, shares, FD" },
+      "identifier": { "kind": "text", "label": "Folio, demat or certificate number" },
+      "description": { "kind": "text", "label": "Description" },
+      "estimatedValue": { "kind": "text", "label": "Approximate value" },
+      "nomineeName": { "kind": "text", "label": "Nominee" }
+    }
+  },
+  "valuables": {
+    "path": "assets.valuables",
+    "step": "assets",
+    "noun": "valuable",
+    "identity": "description",
+    "fields": {
+      "description": { "kind": "text", "label": "Description, for example gold jewellery" },
+      "estimatedValue": { "kind": "text", "label": "Approximate value" }
+    }
+  },
+  "policies": {
+    "path": "insurance.policies",
+    "step": "insurance",
+    "noun": "insurance policy",
+    "identity": "insurer",
+    "requires": { "path": "insurance.hasPolicies", "value": true, "because": "Record that they have life insurance first (field insurance.hasPolicies)." },
+    "fields": {
+      "insurer": { "kind": "text", "label": "Insurer" },
+      "policyNumber": { "kind": "text", "label": "Policy number" },
+      "nomineeName": { "kind": "text", "label": "Nominee" },
+      "nomineeRelationship": { "kind": "select", "label": "Nominee's relationship", "options": ["spouse", "child", "parent", "other"] },
+      "alignWithWill": { "kind": "yes-no", "label": "Should the Will match this nomination" }
+    }
+  },
+  "beneficiaries": {
+    "path": "distribution.beneficiaries",
+    "step": "distribution",
+    "noun": "beneficiary",
+    "identity": "name",
+    "fields": {
+      "name": { "kind": "text", "label": "Name" },
+      "relationship": { "kind": "select", "label": "Relationship", "options": ["spouse", "child", "parent", "other"] },
+      "share": { "kind": "text", "label": "Share, for example 50% or residue" },
+      "substituteBeneficiary": { "kind": "text", "label": "Substitute if they are not alive" }
+    }
+  },
+  "witnesses": {
+    "path": "execution.witnesses",
+    "step": "execution",
+    "noun": "witness",
+    "identity": "fullName",
+    "fields": {
+      "fullName": { "kind": "text", "label": "Full name" },
+      "relationship": { "kind": "text", "label": "Relationship to the person" },
+      "age": { "kind": "text", "label": "Age" },
+      "address": { "kind": "text", "label": "Address" },
+      "isAlsoBeneficiary": { "kind": "yes-no", "label": "Is also a beneficiary" }
+    }
+  }
+}

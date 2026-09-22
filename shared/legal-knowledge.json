@@ -1,0 +1,121 @@
+{
+  "version": "octaraa-legal-kb-2026.09",
+  "sources": [
+    {
+      "id": "isa-1925-s63",
+      "title": "Execution of unprivileged Wills",
+      "citation": "Section 63, Indian Succession Act, 1925",
+      "version": "octaraa-legal-kb-2026.09",
+      "keywords": [
+        "witness",
+        "witnesses",
+        "sign",
+        "signature",
+        "attestation",
+        "execute",
+        "execution",
+        "presence"
+      ],
+      "content": "Every testator, not being a soldier employed in an expedition or engaged in actual warfare, or an airman so employed or engaged, or a mariner at sea, must execute his Will according to the following rules: (a) the testator shall sign or shall affix his mark to the Will, or it shall be signed by some other person in his presence and by his direction; (b) the signature or mark shall be so placed that it appears that it was intended thereby to give effect to the writing as a Will; (c) the Will shall be attested by two or more witnesses, each of whom has seen the testator sign or affix his mark, or has seen some other person sign the Will in the presence and by the direction of the testator, and each of the witnesses shall sign the Will in the presence of the testator, though no particular form of attestation is necessary."
+    },
+    {
+      "id": "isa-1925-s59",
+      "title": "Person capable of making Wills",
+      "citation": "Section 59, Indian Succession Act, 1925",
+      "version": "octaraa-legal-kb-2026.09",
+      "keywords": [
+        "capacity",
+        "sound",
+        "mind",
+        "minor",
+        "capable",
+        "age",
+        "intoxication",
+        "illness"
+      ],
+      "content": "Every person of sound mind not being a minor may dispose of his property by Will. Explanation 1: A married woman may dispose by Will of any property which she could alienate by her own act during her life. Explanation 2: Persons who are deaf or dumb or blind are not thereby incapacitated for making a Will if they are able to know what they do by it. Explanation 3: A person who is ordinarily insane may make a Will during an interval in which he is of sound mind. Explanation 4: No person can make a Will while he is in such a state of mind, whether arising from intoxication or from illness or from any other cause, that he does not know what he is doing."
+    },
+    {
+      "id": "isa-1925-s62",
+      "title": "Will may be revoked or altered",
+      "citation": "Section 62, Indian Succession Act, 1925",
+      "version": "octaraa-legal-kb-2026.09",
+      "keywords": [
+        "revoke",
+        "revocation",
+        "alter",
+        "change",
+        "codicil",
+        "cancel",
+        "prior",
+        "previous"
+      ],
+      "content": "A Will is liable to be revoked or altered by the maker of it at any time when he is competent to dispose of his property by Will. A codicil is an instrument made in relation to a Will, and explaining, altering or adding to its dispositions, and it is deemed to form part of the Will."
+    },
+    {
+      "id": "isa-1925-s67",
+      "title": "Effect of gift to attesting witness",
+      "citation": "Section 67, Indian Succession Act, 1925",
+      "version": "octaraa-legal-kb-2026.09",
+      "keywords": [
+        "witness",
+        "beneficiary",
+        "gift",
+        "bequest",
+        "void",
+        "attesting",
+        "christian",
+        "parsi",
+        "spouse"
+      ],
+      "content": "A Will shall not be deemed to be insufficiently attested by reason of any benefit thereby given either by way of bequest or by way of appointment to any person attesting it, or to his or her wife or husband; but the bequest or appointment shall be void so far as concerns the person so attesting, or the wife or husband of such person, or any person claiming under either of them. Explanation: A legatee under a Will does not lose his legacy by attesting a codicil which confirms the Will. This section does not apply to Wills made by Hindus, Buddhists, Sikhs or Jains, which do not carry the witness-beneficiary bar."
+    },
+    {
+      "id": "registration-act-1908-s18",
+      "title": "Optional registration of Wills",
+      "citation": "Section 18, Registration Act, 1908",
+      "version": "octaraa-legal-kb-2026.09",
+      "keywords": [
+        "registration",
+        "register",
+        "optional",
+        "mandatory",
+        "sub-registrar",
+        "uttarakhand"
+      ],
+      "content": "Registration of a Will is optional in most of India — a Will may be presented for registration at the office of the Sub-Registrar but is not required to be registered to be valid. Registration strengthens evidentiary value and protects against tampering. Under the Uttarakhand Uniform Civil Code framework, registration of a Will is compulsory, a state-specific departure from the general optional treatment."
+    },
+    {
+      "id": "muslim-personal-law-bequest",
+      "title": "Bequests under Muslim personal law",
+      "citation": "Principles of Muslim Personal Law (Shariat), one-third rule",
+      "version": "octaraa-legal-kb-2026.09",
+      "keywords": [
+        "muslim",
+        "islam",
+        "shariat",
+        "sharia",
+        "one-third",
+        "heir",
+        "heirs",
+        "bequest"
+      ],
+      "content": "Under Muslim personal law, a testator can generally bequeath only one-third of the net estate to persons who are not legal heirs; bequests beyond one-third to non-heirs, or any bequest to an heir, require the consent of all legal heirs after the death of the testator. A Will by a Muslim testator is governed by Shariat principles rather than the Indian Succession Act, 1925. Review with a lawyer familiar with Muslim personal law is essential."
+    },
+    {
+      "id": "guardianship-hmga-1956",
+      "title": "Guardians of minor children",
+      "citation": "Section 9, Hindu Minority and Guardianship Act, 1956",
+      "version": "octaraa-legal-kb-2026.09",
+      "keywords": [
+        "guardian",
+        "guardianship",
+        "minor",
+        "child",
+        "children",
+        "custody"
+      ],
+      "content": "A father who is a Hindu may, by Will, appoint a testamentary guardian for his minor legitimate children in respect of their person or property (other than undivided HUF interest). The appointment has no effect if the father predeceases the mother, but revives at the mother’s death if she dies without appointing a guardian by Will. A Hindu mother entitled to act as natural guardian may similarly appoint a testamentary guardian by Will. Courts retain overriding power in the interest of the minor’s welfare."
+    }
+  ]
+}
