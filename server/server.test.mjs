@@ -462,6 +462,11 @@ describe('live voice session (Gemini Live, mocked)', () => {
       // Present from the very first connection (JSON drops the undefined handle) so the server starts issuing
       // resumption handles from turn one, without the client having one to offer yet.
       assert.deepEqual(setup.sessionResumption, {})
+      // Both default to HIGH (quick to decide someone started/stopped talking); LOW/LOW plus a longer silence
+      // window means a thinking-pause mid-sentence isn't read as "done talking".
+      assert.deepEqual(setup.realtimeInputConfig, {
+        automaticActivityDetection: { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW', endOfSpeechSensitivity: 'END_SENSITIVITY_LOW', prefixPaddingMs: 200, silenceDurationMs: 700 },
+      })
       const instruction = setup.systemInstruction.parts[0].text
       assert.match(instruction, /Full legal name/)
       assert.match(instruction, /Rohan {2}Mehta/)
@@ -473,7 +478,7 @@ describe('live voice session (Gemini Live, mocked)', () => {
 
       // A language can be pinned; anything else is ignored rather than trusted.
       await alice('POST', '/api/live/session', { language: 'hi' })
-      assert.match(calls[1].body.bidiGenerateContentSetup.systemInstruction.parts[0].text, /LANGUAGE: Speak Hindi\./)
+      assert.match(calls[1].body.bidiGenerateContentSetup.systemInstruction.parts[0].text, /LANGUAGE: Speak Hindi — that is what they chose/)
       await alice('POST', '/api/live/session', { language: '__proto__' })
       assert.match(calls[2].body.bidiGenerateContentSetup.systemInstruction.parts[0].text, /LANGUAGE: Listen for whatever language they just used/)
 

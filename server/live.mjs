@@ -157,19 +157,27 @@ function stepIdsOf(sessionContext) {
 
 /** The Live API `setup` for one conversation: model, voice, transcripts, the tool and Samaira's instructions plus this person's context. */
 /** The languages the person can pin (Gemini Live speaks and understands all of them). `auto` follows whoever is talking. */
+// Google's own guidance for reliable language pinning is blunt repetition ("RESPOND IN {LANGUAGE}. YOU MUST
+// RESPOND UNMISTAKABLY IN {LANGUAGE}.") — a pin is a deliberate choice from the dropdown, so drifting off it
+// reads as broken, not helpful. https://ai.google.dev/gemini-api/docs/live-api/best-practices
+const BORROWED_TERMS = 'Keep a few words in English the way they are actually said day to day in that language (Will, executor, nominee, guardian) rather than a textbook translation nobody uses out loud.'
+function pin(language) {
+  return `Speak ${language} — that is what they chose, so speak it unmistakably, in ${language}, even for a sentence where they slip into English. Only ease toward the Hindi/English mix people actually use if they themselves keep speaking that mix for several turns running; a single borrowed word from them is not a switch. ${BORROWED_TERMS}`
+}
+
 export const LIVE_LANGUAGES = {
   auto: 'Listen for whatever language they just used and answer straight back in it, switching the moment they do, from your very next reply — never announce the switch, never ask permission, never say things like "switching to Hindi" or "would you like to continue in Hindi", just speak it, the way a bilingual person naturally would. Judge only by what they said out loud: everything the app sends you (screen updates, tool results) is in English and tells you nothing about their language, so it never overrides what you just heard. The moment their turn has even a few Hindi words in it, treat that as enough: answer in the same natural Hinglish mix a young Indian professional would use, not pure textbook Hindi and not pure English — that mix is what most people here actually speak day to day, so it is your default the instant you are unsure. Save plain Hindi for someone speaking plain Hindi themselves, and plain English for someone who keeps speaking plain English throughout. Only before they have said anything at all, greet them in English. The people you talk to are in India, so expect English, Hindi, Hinglish or another Indian language; never assume they speak any other language, and if you cannot make out what was said, say you did not catch it (only when a question is still open) instead of guessing a language.',
   en: 'Speak English by default, since that is what they chose. But if they keep answering you in Hindi or Hinglish for more than a turn or two, do not lecture them about the language setting or keep replying in English regardless — just ease into the same natural Hinglish mix they are using, the way a bilingual person would, without announcing the switch. Only point them to the language setting above the microphone button if they explicitly ask how to change it.',
-  hi: 'Speak Hindi. Keep a few English terms as they are said in everyday Hindi (Will, executor, nominee).',
-  hinglish: 'Speak Hinglish: Hindi and English mixed the way a young Indian professional talks, in a Hindi-style accent.',
-  mr: 'Speak Marathi.',
-  gu: 'Speak Gujarati.',
-  bn: 'Speak Bengali.',
-  ta: 'Speak Tamil.',
-  te: 'Speak Telugu.',
-  kn: 'Speak Kannada.',
-  ml: 'Speak Malayalam.',
-  pa: 'Speak Punjabi.',
+  hi: `Speak Hindi — that is what they chose, so speak it unmistakably, in Hindi, even for a sentence where they slip into English. Only ease toward Hinglish if they themselves keep speaking that mix for several turns running; a single borrowed word from them is not a switch. ${BORROWED_TERMS}`,
+  hinglish: 'Speak Hinglish: Hindi and English mixed the way a young Indian professional talks, in a Hindi-style accent. This is their deliberate choice, so keep that mix consistently rather than drifting to plain English or textbook Hindi from one turn to the next.',
+  mr: pin('Marathi'),
+  gu: pin('Gujarati'),
+  bn: pin('Bengali'),
+  ta: pin('Tamil'),
+  te: pin('Telugu'),
+  kn: pin('Kannada'),
+  ml: pin('Malayalam'),
+  pa: pin('Punjabi'),
 }
 
 /**
@@ -203,6 +211,21 @@ function contextWindowCompression() {
   return { triggerTokens: 16_000, slidingWindow: { targetTokens: 6_000 } }
 }
 
+/**
+ * Both sensitivities default to HIGH -- quick to decide someone has started or finished talking. That reads as
+ * impatient here: people are recalling a spelling, an amount, a date, a relative's name mid-sentence, often in a
+ * second language. LOW/LOW plus a generous silence window lets a thinking-pause be a pause, not a handoff, at
+ * the cost of a beat more latency before she replies. https://ai.google.dev/gemini-api/docs/live-api/capabilities
+ */
+function activityDetection() {
+  return {
+    startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+    endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+    prefixPaddingMs: 200,
+    silenceDurationMs: 700,
+  }
+}
+
 export function buildLiveSetup({ estateSnapshot, sessionContext, interviewHistory, language, resumeHandle } = {}) {
   const context = [
     tagged('session_context', JSON.stringify(plainObject(sessionContext, SESSION_CONTEXT_LIMIT) ?? {})),
@@ -218,6 +241,7 @@ export function buildLiveSetup({ estateSnapshot, sessionContext, interviewHistor
     systemInstruction: { parts: [{ text: `${INSTRUCTIONS}\n${languageRule(language)}\n${context}` }] },
     inputAudioTranscription: { languageCodes: transcriptionLanguages(language) },
     outputAudioTranscription: {},
+    realtimeInputConfig: { automaticActivityDetection: activityDetection() },
     tools: [{ functionDeclarations: [recordTool(), editListTool(), undoTool(), navigateTool(stepIdsOf(sessionContext))] }],
     // Present from the first connection (not just on reconnect) so the server starts issuing resumption
     // handles from turn one; the client reconnects with the last handle it saw if the call drops.
