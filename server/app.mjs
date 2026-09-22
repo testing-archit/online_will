@@ -10,9 +10,7 @@ import {
   validateAttachment,
 } from './brevo.mjs'
 import { classifyDocumentWithFallback } from './documents.mjs'
-import { isDeepgramConfigured, isTtsLanguageSupported, MAX_LISTEN_BYTES, MAX_TTS_CHARS, synthesizeSpeech, transcribeWithDeepgram } from './deepgram.mjs'
 import { createLiveSession, isLiveConfigured } from './live.mjs'
-import { isSmallestConfigured, isSmallestLanguage, MAX_SMALLEST_TTS_CHARS, synthesizeWithSmallest } from './smallest.mjs'
 import {
   answerEstateQuestionWithGemini,
   extractEstateIntentWithGemini,
@@ -54,7 +52,6 @@ const AI_ROUTES = [
   '/api/execution/',
 ]
 const AI_RATE_LIMIT = { limit: 30, windowMs: 60_000 }
-const SPEECH_RATE_LIMIT = { limit: 120, windowMs: 60_000 }
 const NOTIFICATION_AUDIENCES = ['client', 'advisor', 'lawyer', 'operations']
 const MAX_JOBS_PER_REQUEST = 20
 
@@ -118,8 +115,6 @@ async function route(request, response) {
       schedulerEnabled: process.env.SCHEDULER_ENABLED === 'true',
       aiConfigured: Boolean(process.env.GEMINI_API_KEY),
       emailConfigured: Boolean(process.env.BREVO_API_KEY && process.env.BREVO_SENDER_EMAIL),
-      speechConfigured: isDeepgramConfigured(),
-      hindiSpeechConfigured: isSmallestConfigured(),
       liveConfigured: isLiveConfigured(),
       legalKnowledgeBaseVersion: getKnowledgeBaseVersion(),
     })
@@ -144,12 +139,7 @@ async function route(request, response) {
 
   if (method === 'GET' && pathname === '/api/session') return sendJson(request, response, 200, { user })
 
-  if (pathname === '/api/speech/synthesize' || pathname === '/api/speech/listen') {
-    // A spoken conversation makes several short calls per turn, so speech has its own, larger bucket.
-    enforceRateLimit(`speech:${user.sub}`, SPEECH_RATE_LIMIT)
-  } else if (AI_ROUTES.some((prefix) => pathname.startsWith(prefix))) {
-    enforceRateLimit(`ai:${user.sub}`, AI_RATE_LIMIT)
-  }
+  if (AI_ROUTES.some((prefix) => pathname.startsWith(prefix))) enforceRateLimit(`ai:${user.sub}`, AI_RATE_LIMIT)
 
   // ------------------------------------------------------------------ wills
   if (segments[1] === 'wills') return handleWills(request, response, segments, user, method)
@@ -224,34 +214,7 @@ async function route(request, response) {
     return sendJson(request, response, 200, { answer: await answerEstateQuestionWithGemini(body) })
   }
 
-  if (method === 'POST' && pathname === '/api/speech/synthesize') {
-    const body = await readJson(request)
-    // Hindi / Hinglish → Smallest.ai (WAV); English → Deepgram Aura (WAV). Anything else uses the browser voice.
-    const hindi = isSmallestLanguage(body.language)
-    if (!hindi && !isTtsLanguageSupported(body.language)) throw httpError(400, 'Server speech supports English, Hindi and Hinglish; other languages use the browser voice')
-    requireString(body.text, 'text', hindi ? MAX_SMALLEST_TTS_CHARS : MAX_TTS_CHARS)
-    const audio = hindi ? await synthesizeWithSmallest(body.text.trim()) : await synthesizeSpeech(body.text.trim())
-    response.writeHead(200, { ...baseHeaders(request), 'content-type': 'audio/wav', 'content-length': audio.length })
-    response.end(audio)
-    return
-  }
-
-  // Conversation turns: raw audio in, transcript out. Nothing is stored.
-  if (method === 'POST' && pathname === '/api/speech/listen') {
-    const audio = await readRaw(request, MAX_LISTEN_BYTES)
-    if (audio.length < 200) throw httpError(400, 'No audio received')
-    const mime = normalizeMimeType(request.headers['content-type'])
-    if (!/^(audio|video)\//.test(mime)) throw httpError(415, 'Send audio with an audio/* content-type')
-    const language = url.searchParams.get('language') ?? 'en'
-    let result
-    if (isDeepgramConfigured()) result = await transcribeWithDeepgram(audio, mime, language)
-    else {
-      const gemini = await transcribeAudioWithGemini({ mimeType: mime, base64Data: audio.toString('base64'), languageHint: language })
-      result = { transcript: gemini.transcript, confidence: 0, language }
-    }
-    return sendJson(request, response, 200, result)
-  }
-
+  // Dictation's "Record" fallback (VoiceControls): audio in, transcript out for a text field. Nothing is stored.
   if (method === 'POST' && pathname === '/api/speech/transcribe') {
     const body = await readJson(request, FILE_BODY_LIMIT)
     let { mimeType, base64Data } = body
@@ -261,16 +224,7 @@ async function route(request, response) {
       mimeType = record.mimeType
       base64Data = buffer.toString('base64')
     }
-    let transcription
-    if (isDeepgramConfigured()) {
-      try {
-        const heard = await transcribeWithDeepgram(Buffer.from(base64Data, 'base64'), normalizeMimeType(mimeType), body.languageHint)
-        transcription = { transcript: heard.transcript, language: heard.language, normalizedEnglishSummary: '', followUpQuestions: [] }
-      } catch (error) {
-        console.warn(`Deepgram transcription failed, falling back to Gemini: ${error.message}`)
-      }
-    }
-    transcription ??= await transcribeAudioWithGemini({ mimeType: normalizeMimeType(mimeType), base64Data, languageHint: body.languageHint })
+    const transcription = await transcribeAudioWithGemini({ mimeType: normalizeMimeType(mimeType), base64Data, languageHint: body.languageHint })
     return sendJson(request, response, 200, { transcription })
   }
 
@@ -602,19 +556,6 @@ function baseHeaders(request) {
 function sendJson(request, response, status, payload) {
   response.writeHead(status, { ...baseHeaders(request), 'content-type': 'application/json' })
   response.end(status === 204 ? undefined : JSON.stringify(payload))
-}
-
-async function readRaw(request, limit) {
-  const declared = Number(request.headers['content-length'])
-  if (Number.isFinite(declared) && declared > limit) throw httpError(413, 'Audio is too large')
-  const chunks = []
-  let received = 0
-  for await (const chunk of request) {
-    received += chunk.length
-    if (received > limit) throw httpError(413, 'Audio is too large')
-    chunks.push(chunk)
-  }
-  return Buffer.concat(chunks)
 }
 
 async function readJson(request, limit = JSON_BODY_LIMIT) {

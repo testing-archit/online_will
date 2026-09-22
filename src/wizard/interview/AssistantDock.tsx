@@ -2,23 +2,22 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { MessageCircle, Mic, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFormContext } from 'react-hook-form'
-import { buildAssistantContext, buildLiveContext, contextGreeting, nextStepAfter, openingLine } from '../../lib/assistantContext'
+import { buildAssistantContext, buildLiveContext, contextGreeting, nextStepAfter } from '../../lib/assistantContext'
 import { getBackendHealth } from '../../lib/backendClient'
 import { isLiveSupported } from '../../lib/liveVoice'
 import { detectLanguage } from '../../lib/language'
 import type { WillData } from '../../lib/types'
 import { useWizardNavigation } from '../navigation'
 import { STEPS } from '../stepConfig'
-import { ConversationMode } from './ConversationMode'
 import { LiveVoiceDock } from './LiveVoiceDock'
 import { InterviewComposer, ProposalList } from './InterviewComposer'
 import { useInterview, type LanguageChoice } from './useInterview'
 
 /**
- * Samaira, available on every step. A launcher sits bottom-right; it opens a side panel that leaves the form
- * usable beside it. The panel is mounted at the shell, so the conversation and any entries waiting for
- * confirmation survive moving between steps. Closing it ends a live voice conversation (the microphone is
- * released when ConversationMode unmounts).
+ * Samaira, available on every step. A launcher sits bottom-right; it opens a side panel (typed, with one-shot
+ * voice dictation) that leaves the form usable beside it, or a separate live voice call (`LiveVoiceDock`,
+ * Gemini Live) -- only one is open at a time. The panel is mounted at the shell, so the conversation and any
+ * entries waiting for confirmation survive moving between steps.
  */
 export function AssistantDock({ stepId }: { stepId: string }) {
   const [isOpen, setOpen] = useState(false)
@@ -33,9 +32,6 @@ export function AssistantDock({ stepId }: { stepId: string }) {
   const stepTitle = context.currentStep.title
   const overall = context.overallCompletionPercent
   const open = context.openQuestions
-  // Continue from the last thing she said if it is in the language they want; otherwise open on where they are now, in that language.
-  const opening = openingLine(context, [...messages].reverse().find((item) => item.role === 'samaira')?.content, language)
-
   const nextStep = open.length === 0 ? nextStepAfter(context) : null
   // The language she speaks and writes her own questions in: the one they picked, or (on auto) the one they last used.
   const lastUserText = [...messages].reverse().find((item) => item.role === 'user')?.content
@@ -185,7 +181,6 @@ export function AssistantDock({ stepId }: { stepId: string }) {
                 <span className="font-semibold text-slate-700">{stepTitle}</span>
                 {open.length > 0 ? ` · ${open.length} required ${open.length === 1 ? 'question' : 'questions'} open` : ''} · Will {overall}% complete
               </p>
-              <ConversationMode send={send} isThinking={isThinking} lastSamairaMessage={opening} language={language} onLanguageChange={setLanguage} />
             </div>
 
             <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">

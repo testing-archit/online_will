@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildAssistantContext, buildLiveContext, contextGreeting, newlyAnswered, openingLine, screenSignature, screenUpdateMessage } from './assistantContext'
+import { buildAssistantContext, buildLiveContext, contextGreeting, newlyAnswered, screenSignature, screenUpdateMessage } from './assistantContext'
 import { detectLanguage } from './language'
 import { defaultWillData } from './defaultData'
 
@@ -43,9 +43,6 @@ describe('assistant context', () => {
 
 describe('the first thing Samaira says, in the language you chose', () => {
   const context = buildAssistantContext(defaultWillData(), STEPS, 'personal')
-  const english = 'Understood. I found some estate-planning intent, but I need one more detail before I can structure it confidently.'
-  const hindi = 'समझ गई। मुझे कुछ जानकारी मिली है, लेकिन इसे ठीक से दर्ज करने के लिए एक और बात चाहिए।'
-  const hinglish = 'Samajh gayi. Main wife ko primary beneficiary note kar rahi hoon, aur Noida wala ghar beti ke liye.'
 
   it('opens in Hindi, Hinglish or English as chosen, with the step name', () => {
     expect(contextGreeting(context, 'hi')).toMatch(/[\u0900-\u097F]/)
@@ -53,29 +50,6 @@ describe('the first thing Samaira says, in the language you chose', () => {
     expect(detectLanguage(contextGreeting(context, 'hinglish'))).toBe('hinglish')
     expect(detectLanguage(contextGreeting(context, 'en'))).toBe('en')
     for (const language of ['hi', 'hinglish', 'en'] as const) expect(contextGreeting(context, language)).toContain(context.openQuestions[0])
-  })
-
-  it('never reads an English reply aloud to someone who chose Hindi or Hinglish', () => {
-    expect(openingLine(context, english, 'hi')).toMatch(/[\u0900-\u097F]/)
-    expect(detectLanguage(openingLine(context, english, 'hinglish'))).toBe('hinglish')
-    expect(openingLine(context, english, 'hi')).not.toContain('Understood')
-    expect(openingLine(context, hindi, 'en')).toBe(contextGreeting(context, 'en'))
-  })
-
-  it('picks up from the last reply when it is already in the chosen language, or on auto', () => {
-    expect(openingLine(context, hindi, 'hi')).toBe(hindi)
-    expect(openingLine(context, hinglish, 'hinglish')).toBe(hinglish)
-    // Hindi and Hinglish sound alike to the voice, so a reply in one is fine for the other.
-    expect(openingLine(context, hindi, 'hinglish')).toBe(hindi)
-    expect(openingLine(context, hinglish, 'hi')).toBe(hinglish)
-    expect(openingLine(context, english, 'en')).toBe(english)
-    expect(openingLine(context, english, 'auto')).toBe(english)
-    expect(openingLine(context, hindi, 'auto')).toBe(hindi)
-  })
-
-  it('opens fresh when there is nothing to pick up from', () => {
-    expect(openingLine(context, undefined, 'auto')).toBe(contextGreeting(context, 'en'))
-    expect(openingLine(context, '  ', 'hi')).toBe(contextGreeting(context, 'hi'))
   })
 
   describe('live voice screen context', () => {

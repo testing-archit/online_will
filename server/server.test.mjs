@@ -16,7 +16,6 @@ for (const key of ['GEMINI_API_KEY', 'DEEPGRAM_API_KEY', 'BREVO_API_KEY', 'LAWYE
 const { createApiServer } = await import('./app.mjs')
 const { assertAuthConfig } = await import('./auth.mjs')
 const { classifyFileName } = await import('./documents.mjs')
-const { clearSmallestCache, prepareSpeechText } = await import('./smallest.mjs')
 const { sanitizeFieldUpdates } = await import('./gemini.mjs')
 
 let server
@@ -377,167 +376,39 @@ describe('suggested field updates', () => {
   })
 })
 
-describe('speech (Deepgram, mocked)', () => {
+describe('speech (dictation transcription, Gemini-mocked)', () => {
   const realFetch = globalThis.fetch
-  let seen = []
 
-  function mockDeepgram() {
-    seen = []
+  it('transcribes recorded audio for the dictation "Record" fallback (VoiceControls)', async () => {
+    process.env.GEMINI_API_KEY = 'gemini-test-key'
     globalThis.fetch = async (url, init) => {
-      if (!String(url).startsWith('https://api.deepgram.com')) return realFetch(url, init)
-      seen.push({ url: String(url), auth: init?.headers?.authorization, contentType: init?.headers?.['content-type'], body: init?.body })
-      if (String(url).includes('/speak')) return new Response(new Uint8Array([0x49, 0x44, 0x33, 1, 2, 3]), { status: 200 })
-      return Response.json({ results: { channels: [{ alternatives: [{ transcript: 'meri beti ko ghar dena hai', confidence: 0.93 }] }] } })
-    }
-  }
-  const restore = () => {
-    globalThis.fetch = realFetch
-    delete process.env.DEEPGRAM_API_KEY
-  }
-
-  it('reports speech unconfigured and refuses to synthesize without a key', async () => {
-    const alice = api((await login('client', 'alice-speech-01')).token)
-    assert.equal((await (await fetch(`${base}/api/health`)).json()).speechConfigured, false)
-    assert.equal((await alice('POST', '/api/speech/synthesize', { text: 'hello', language: 'en' })).status, 503)
-  })
-
-  it('synthesizes English speech server-side, keeps the key server-side, and rejects unsupported input', async () => {
-    process.env.DEEPGRAM_API_KEY = 'test-key'
-    mockDeepgram()
-    try {
-      const alice = api((await login('client', 'alice-speech-02')).token)
-      assert.equal((await (await fetch(`${base}/api/health`)).json()).speechConfigured, true)
-
-      const ok = await fetch(`${base}/api/speech/synthesize`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${(await login('client', 'alice-speech-03')).token}` }, body: JSON.stringify({ text: 'Hello there.', language: 'en' }) })
-      assert.equal(ok.status, 200)
-      assert.equal(ok.headers.get('content-type'), 'audio/wav')
-      assert.equal((await ok.arrayBuffer()).byteLength, 6)
-      assert.match(seen[0].url, /\/speak\?model=aura-2-thalia-en&encoding=linear16&container=wav&sample_rate=24000/)
-      assert.equal(seen[0].auth, 'Token test-key')
-
-      // Written text is tidied into speakable text before it is voiced.
-      await alice('POST', '/api/speech/synthesize', { text: '**Great** — your will is saved 🎉', language: 'en' })
-      assert.equal(JSON.parse(seen[1].body).text, 'Great, your will is saved')
-
-      assert.equal((await alice('POST', '/api/speech/synthesize', { text: 'Bonjour', language: 'fr' })).status, 400)
-      assert.equal((await alice('POST', '/api/speech/synthesize', { text: 'x'.repeat(501), language: 'en' })).status, 413)
-      assert.equal((await fetch(`${base}/api/speech/synthesize`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"text":"hi"}' })).status, 401)
-    } finally {
-      restore()
-    }
-  })
-
-  it('voices Hindi and Hinglish through Smallest.ai without exposing the key', async () => {
-    const alice = api((await login('client', 'alice-speech-05')).token)
-    assert.equal((await (await fetch(`${base}/api/health`)).json()).hindiSpeechConfigured, false)
-    assert.equal((await alice('POST', '/api/speech/synthesize', { text: 'नमस्ते', language: 'hi' })).status, 503)
-
-    process.env.SMALLEST_API_KEY = 'smallest-test-key'
-    const calls = []
-    globalThis.fetch = async (url, init) => {
-      if (!String(url).startsWith('https://api.smallest.ai')) return realFetch(url, init)
-      calls.push({ url: String(url), auth: init.headers.authorization, body: JSON.parse(init.body) })
-      return new Response(new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2]), { status: 200 })
+      if (!String(url).startsWith('https://generativelanguage.googleapis.com')) return realFetch(url, init)
+      const parsed = JSON.parse(init.body)
+      return Response.json({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: JSON.stringify({ transcript: 'meri beti ko ghar dena hai', language: 'hinglish', normalizedEnglishSummary: 'Give the house to my daughter.', followUpQuestions: [] }) }],
+            },
+          },
+        ],
+        // Surface what was actually sent, for the assertion below.
+        __sentParts: parsed.contents?.[0]?.parts,
+      })
     }
     try {
-      assert.equal((await (await fetch(`${base}/api/health`)).json()).hindiSpeechConfigured, true)
-      for (const language of ['hi', 'hinglish']) {
-        const res = await fetch(`${base}/api/speech/synthesize`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${(await login('client', `alice-speech-${language}`)).token}` }, body: JSON.stringify({ text: `Aapki will save ho gayi hai. (${language})`, language }) })
-        assert.equal(res.status, 200)
-        assert.equal(res.headers.get('content-type'), 'audio/wav')
-        assert.equal((await res.arrayBuffer()).byteLength, 6)
-      }
-      assert.equal(calls.length, 2)
-      assert.equal(calls[0].url, 'https://api.smallest.ai/waves/v1/tts')
-      assert.equal(calls[0].auth, 'Bearer smallest-test-key')
-      assert.deepEqual(calls[0].body, { text: 'Aapki will save ho gayi hai. (hi)', voice_id: 'meher', model: 'lightning_v3.1_pro', language: 'hi', sample_rate: 24000, speed: 0.95, output_format: 'wav' })
-
-      assert.equal((await alice('POST', '/api/speech/synthesize', { text: 'x'.repeat(1501), language: 'hi' })).status, 413)
-
-      // Repeats are served from the cache; a different text (or voice) is a new API call.
-      const again = await alice('POST', '/api/speech/synthesize', { text: 'Aapki will save ho gayi hai. (hi)', language: 'hinglish' })
-      assert.equal(again.status, 200)
-      assert.equal(calls.length, 2)
-      await Promise.all([1, 2, 3].map(() => alice('POST', '/api/speech/synthesize', { text: 'Ek hi baar.', language: 'hi' })))
-      assert.equal(calls.length, 3)
-      process.env.SMALLEST_TTS_VOICE = 'other'
-      await alice('POST', '/api/speech/synthesize', { text: 'Ek hi baar.', language: 'hi' })
-      assert.equal(calls.length, 4)
-      delete process.env.SMALLEST_TTS_VOICE
-
-      // Failures are never cached.
-      clearSmallestCache()
-      globalThis.fetch = async (url, init) => (String(url).startsWith('https://api.smallest.ai') ? new Response('nope', { status: 401 }) : realFetch(url, init))
-      const failed = await alice('POST', '/api/speech/synthesize', { text: 'नमस्ते', language: 'hi' })
-      assert.equal(failed.status, 502)
-      assert.doesNotMatch(JSON.stringify(failed.json), /smallest-test-key/)
-    } finally {
-      globalThis.fetch = realFetch
-      delete process.env.SMALLEST_API_KEY
-      delete process.env.SMALLEST_TTS_VOICE
-      clearSmallestCache()
-    }
-  })
-
-  it('sends a whole Hinglish reply as one request, in clean spoken text', async () => {
-    process.env.SMALLEST_API_KEY = 'smallest-test-key'
-    const bodies = []
-    globalThis.fetch = async (url, init) => {
-      if (!String(url).startsWith('https://api.smallest.ai')) return realFetch(url, init)
-      bodies.push(JSON.parse(init.body))
-      return new Response(new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2]), { status: 200 })
-    }
-    try {
-      const token = (await login('client', 'alice-speech-flow')).token
-      const reply = 'Samajh gayi. Main **wife** ko primary beneficiary note kar rahi hoon 🙂 — kya Noida wala ghar bhi unhi ko dena hai? Maine ise aapki screen par rakh diya hai — please wahin confirm kijiye.'.repeat(4)
-      const res = await fetch(`${base}/api/speech/synthesize`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text: reply, language: 'hinglish' }) })
+      const alice = api((await login('client', 'alice-speech-01')).token)
+      const res = await alice('POST', '/api/speech/transcribe', { mimeType: 'audio/webm', base64Data: Buffer.from('fake-audio').toString('base64'), languageHint: 'hinglish' })
       assert.equal(res.status, 200)
-      assert.equal(bodies.length, 1)
-      assert.ok(bodies[0].text.length > 500, 'the whole reply, not a sentence')
-      assert.doesNotMatch(bodies[0].text, /[*—🙂]/u)
+      assert.deepEqual(res.json.transcription, {
+        transcript: 'meri beti ko ghar dena hai',
+        language: 'hinglish',
+        normalizedEnglishSummary: 'Give the house to my daughter.',
+        followUpQuestions: [],
+      })
     } finally {
       globalThis.fetch = realFetch
-      delete process.env.SMALLEST_API_KEY
-      clearSmallestCache()
-    }
-  })
-
-  it('tidies written text into spoken text', () => {
-    assert.equal(prepareSpeechText('Ek **baat** — theek hai?  Haan !'), 'Ek baat, theek hai? Haan!')
-    assert.equal(prepareSpeechText('# Title\n> quote 😀'), 'Title quote')
-  })
-
-  it('respells "Samaira" as "Sumyra" for the voice only (both engines misread the written spelling)', () => {
-    assert.equal(prepareSpeechText("Hi, I'm Samaira from Octaraa."), "Hi, I'm Sumyra from Octaraa.")
-    assert.equal(prepareSpeechText('samaira ne yeh note kiya'), 'Sumyra ne yeh note kiya')
-    assert.equal(prepareSpeechText('Samairaji, kaise hain?'), 'Samairaji, kaise hain?') // whole word only
-  })
-
-  it('transcribes a conversation turn from raw audio, mapping Hinglish to Nova-3 multilingual mode', async () => {
-    process.env.DEEPGRAM_API_KEY = 'test-key'
-    mockDeepgram()
-    try {
-      const { token } = await login('client', 'alice-speech-04')
-      const listen = (language, type, size = 400) =>
-        fetch(`${base}/api/speech/listen?language=${language}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': type }, body: new Uint8Array(size) })
-
-      const hinglish = await listen('hinglish', 'audio/webm')
-      assert.equal(hinglish.status, 200)
-      assert.deepEqual(await hinglish.json(), { transcript: 'meri beti ko ghar dena hai', confidence: 0.93, language: 'multi' })
-      assert.match(seen.at(-1).url, /model=nova-3&language=multi/)
-      assert.equal(seen.at(-1).contentType, 'audio/webm')
-
-      await listen('auto', 'audio/webm')
-      assert.match(seen.at(-1).url, /language=multi/)
-      await listen('en', 'audio/webm;codecs=opus')
-      assert.match(seen.at(-1).url, /language=en-IN/)
-      await listen('hi', 'audio/mp4')
-      assert.match(seen.at(-1).url, /language=hi&/)
-
-      assert.equal((await listen('en', 'application/json')).status, 415)
-      assert.equal((await listen('en', 'audio/webm', 10)).status, 400)
-    } finally {
-      restore()
+      delete process.env.GEMINI_API_KEY
     }
   })
 })

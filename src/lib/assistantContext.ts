@@ -1,6 +1,5 @@
 import { getFillableFields, type FillableField } from './fieldProposals'
 import { listsOnStep } from './liveEdits'
-import { detectLanguage } from './language'
 import { getMissingRequiredQuestions, getOverallCompletion, getSectionCompletion, hasRequiredQuestions } from './questionnaireSchema'
 import type { WillData } from './types'
 
@@ -153,18 +152,4 @@ export function nextStepAfter(context: AssistantContext): { id: string; title: s
   const index = context.sections.findIndex((section) => section.id === context.currentStep.id)
   const after = context.sections.slice(index + 1)
   return after.find((section) => section.completionPercent !== null && section.completionPercent < 100) ?? after[0] ?? null
-}
-
-/**
- * The first thing Samaira says when a voice conversation starts. If she already said something and it is in the
- * language the person wants now (or they left it on auto), she picks up from it. Otherwise repeating it would read an
- * English reply aloud to someone who chose Hindi, so she opens fresh in their language instead.
- */
-export function openingLine(context: AssistantContext, lastSamairaMessage: string | undefined, choice: 'auto' | GreetingLanguage): string {
-  const last = lastSamairaMessage?.trim()
-  // Hindi replies almost always contain an English word or two (a step name, "will"), which reads as Hinglish; the two
-  // sound the same to a Hindi voice, so either counts as "already in the language they want". English does not.
-  const detected = last ? detectLanguage(last) : 'en'
-  if (last && (choice === 'auto' || detected === choice || (choice !== 'en' && detected !== 'en'))) return last
-  return contextGreeting(context, choice === 'auto' ? 'en' : choice)
 }

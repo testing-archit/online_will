@@ -166,20 +166,12 @@ describe('every wizard step renders without crashing, offline', () => {
       await unmount()
     })
 
-    it('keeps the voice controls pinned outside the scrolling conversation, and shows live progress', async () => {
-      // Voice needs a speech API; jsdom has none, so give it a stand-in.
-      ;(window as unknown as Record<string, unknown>).SpeechRecognition = class {}
+    it('shows live progress in the panel header', async () => {
       const { container, unmount } = await mount(<WizardShell />)
       await act(async () => launcher(container)!.click())
-      const voice = panel()!.querySelector('section[aria-label="Talk to Samaira"]')!
-      expect(voice).not.toBeNull()
-      // The scrolling region is the one holding the conversation; the voice card must not be inside it.
-      const scroller = panel()!.querySelector('section[aria-label="Conversation"]')!.closest('.overflow-y-auto')!
-      expect(scroller.contains(voice)).toBe(false)
       expect(panel()!.textContent).toMatch(/required questions? open/)
       expect(panel()!.textContent).toMatch(/Will \d+% complete/)
       await unmount()
-      delete (window as unknown as Record<string, unknown>).SpeechRecognition
     })
 
     it('proposes answers for the current step, and only fills them in after you confirm', async () => {

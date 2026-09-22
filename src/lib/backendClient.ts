@@ -167,8 +167,6 @@ const dataOrNull = <T>(result: ApiResult<T>): T | null => (result.ok ? result.da
 
 export interface BackendHealth {
   ok: boolean
-  speechConfigured: boolean
-  hindiSpeechConfigured?: boolean
   liveConfigured?: boolean
   authRequired: boolean
   aiConfigured: boolean
@@ -432,36 +430,3 @@ export async function setCommentStatus(commentId: string, status: 'open' | 'reso
   return dataOrNull(await request<{ comment: ServerComment }>(`/api/comments/${commentId}`, { method: 'PATCH', body: { status } }))?.comment ?? null
 }
 
-// ------------------------------------------------------------------ speech
-
-/** Speech from the server voice (English: Deepgram Aura, Hindi/Hinglish: Smallest.ai). Returns null when unavailable so callers fall back to the browser voice. */
-export async function synthesizeSpeechBlob(text: string, signal?: AbortSignal, language: 'en' | 'hi' | 'hinglish' = 'en'): Promise<Blob | null> {
-  try {
-    const token = await currentToken()
-    const response = await fetch(`${API_BASE}/api/speech/synthesize`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ text, language }),
-      signal: signal ?? AbortSignal.timeout(30_000),
-    })
-    return response.ok ? await response.blob() : null
-  } catch {
-    return null
-  }
-}
-
-/** One spoken turn: raw audio in, transcript out (nothing is stored on the server). */
-export async function listenToAudio(audio: Blob, language: string): Promise<{ transcript: string; language: string } | null> {
-  try {
-    const token = await currentToken()
-    const response = await fetch(`${API_BASE}/api/speech/listen?language=${encodeURIComponent(language)}`, {
-      method: 'POST',
-      headers: { 'content-type': audio.type || 'audio/webm', ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: audio,
-      signal: AbortSignal.timeout(30_000),
-    })
-    return response.ok ? ((await response.json()) as { transcript: string; language: string }) : null
-  } catch {
-    return null
-  }
-}
