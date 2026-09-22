@@ -300,7 +300,16 @@ export function LiveVoiceDock({
             setNotice(message)
           },
         },
-        { greeting: opening(language) },
+        {
+          greeting: opening(language),
+          // Called on a dropped connection (network hiccup, or Google's own 15-minute cutoff), never on a person-initiated stop.
+          remint: async (resumeHandle) => {
+            const now = latest.current
+            const ctx = now.getContextFor(now.currentStepId)
+            const minted = await createLiveSessionFromApi(now.getData(), ctx as never, language, resumeHandle)
+            return minted.ok && minted.session ? minted.session : null
+          },
+        },
       )
       handle.current = started
       sendText.current = (text) => started.sendText(text)

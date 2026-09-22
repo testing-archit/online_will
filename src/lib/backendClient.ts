@@ -218,10 +218,18 @@ export interface LiveSessionResult {
   error?: string
 }
 
-/** A single-use token (and the locked configuration) for one real-time voice conversation with Samaira. */
-export async function createLiveSessionFromApi(data: WillData, sessionContext: AssistantContext, language = 'auto'): Promise<LiveSessionResult> {
+/**
+ * A single-use token (and the locked configuration) for one real-time voice conversation with Samaira.
+ * `resumeHandle` carries a prior session's resumption handle through, when this mint is for a reconnect.
+ */
+export async function createLiveSessionFromApi(
+  data: WillData,
+  sessionContext: AssistantContext,
+  language = 'auto',
+  resumeHandle?: string,
+): Promise<LiveSessionResult> {
   const result = await request<{ session: { token: string; setup: Record<string, unknown>; expiresAt: string } }>('/api/live/session', {
-    body: { estateSnapshot: toAiSnapshot(data), sessionContext, interviewHistory: data.assistantIntake.interviewMessages.slice(-12), language },
+    body: { estateSnapshot: toAiSnapshot(data), sessionContext, interviewHistory: data.assistantIntake.interviewMessages.slice(-12), language, resumeHandle },
   })
   return result.ok ? { ok: true, session: result.data?.session } : { ok: false, error: result.error }
 }

@@ -3,14 +3,20 @@
  * single-use token the server minted (the API key never reaches the browser, and the model, voice, tool and
  * instructions are locked into that token). Spoken in whatever language the person uses, or the one they pin.
  *
- * Audio in: microphone → 16 kHz 16-bit PCM, streamed in ~100 ms chunks. Audio out: 24 kHz PCM, scheduled back to back.
+ * Audio in: microphone → 16 kHz 16-bit PCM, streamed in ~40 ms chunks. Audio out: 24 kHz PCM, scheduled back to back.
  * When the person starts talking over her, the server says `interrupted` and whatever is still queued is dropped.
+ *
+ * Google hard-disconnects an audio-only session at 15 minutes and also drops the connection on ordinary network
+ * hiccups; without help every drop would end the call and lose the conversation. Session resumption avoids that:
+ * the server hands back a resumption handle as the call goes on, and on an unexpected drop this reconnects with
+ * that handle instead of ending the call -- the person never has to restart. A clean, person-initiated stop() never
+ * reconnects. https://ai.google.dev/gemini-api/docs/live-session
  */
 
 const LIVE_WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained'
 const INPUT_RATE = 16_000
 const OUTPUT_RATE = 24_000
-const SEND_SAMPLES = 1_600 // 100 ms of 16 kHz audio
+const SEND_SAMPLES = 640 // 40 ms of 16 kHz audio -- Google's recommended range is 20-40 ms; smaller chunks cut latency
 
 export type LiveState = 'connecting' | 'listening' | 'speaking' | 'ended'
 
@@ -32,6 +38,16 @@ export interface LiveCallbacks {
   /** Samaira asked for something to be done, with what the person has said so far this turn. The result goes back to her as the tool's answer. */
   onToolCall: (name: string, args: Record<string, unknown>, heard: string) => Promise<Record<string, unknown>> | Record<string, unknown>
   onError: (message: string) => void
+}
+
+export interface LiveStartOptions {
+  /** What Samaira opens the call with, sent once the very first time the socket comes up (never resent on a reconnect). */
+  greeting?: string
+  /**
+   * Mint a fresh session for a reconnect, carrying the last resumption handle this call saw (undefined on the very
+   * first connection, or if the server never sent one). Returns null to give up and end the call instead.
+   */
+  remint?: (resumeHandle: string | undefined) => Promise<LiveSession | null>
 }
 
 export interface LiveHandle {
@@ -118,7 +134,7 @@ export function isLiveSupported(): boolean {
 
 // ---------------------------------------------------------------- the conversation
 
-export async function startLiveConversation(session: LiveSession, callbacks: LiveCallbacks, options: { greeting?: string } = {}): Promise<LiveHandle> {
+export async function startLiveConversation(session: LiveSession, callbacks: LiveCallbacks, options: LiveStartOptions = {}): Promise<LiveHandle> {
   callbacks.onState('connecting')
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } })
@@ -138,6 +154,10 @@ export async function startLiveConversation(session: LiveSession, callbacks: Liv
   let sources: AudioBufferSourceNode[] = []
   let pending = new Float32Array(0)
   let currentState: LiveState = 'connecting'
+  let socket: WebSocket
+  let firstConnection = true
+  let reconnecting = false
+  let resumeHandle: string | undefined
 
   const setState = (state: LiveState) => {
     if (currentState === state) return
@@ -145,7 +165,6 @@ export async function startLiveConversation(session: LiveSession, callbacks: Liv
     callbacks.onState(state)
   }
 
-  const socket = new WebSocket(`${LIVE_WS}?access_token=${encodeURIComponent(session.token)}`)
   const send = (message: unknown) => {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
   }
@@ -260,54 +279,109 @@ export async function startLiveConversation(session: LiveSession, callbacks: Liv
     setState('ended')
   }
 
-  socket.onopen = () => send({ setup: session.setup })
-  socket.onerror = () => finish('The live connection failed. Please try again.')
-  socket.onclose = (event) => {
-    if (!stopped) finish(event.code === 1000 ? undefined : event.reason || 'The live connection closed.')
-  }
-  socket.onmessage = async (event) => {
-    if (stopped) return
-    let message: Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+  /**
+   * A drop that wasn't `stop()` calling this. Every attempt needs a fresh session (a new resumption handle can only
+   * be used once), so this re-mints one through the caller rather than just re-opening the same socket. One attempt
+   * per drop: if it also fails, that failure comes back around to here again and finish()es instead of looping.
+   */
+  const reconnectOrFinish = async (fallbackError: string) => {
+    if (stopped || reconnecting) return
+    if (!options.remint) {
+      finish(fallbackError)
+      return
+    }
+    reconnecting = true
+    setState('connecting')
+    dropQueuedAudio()
+    flushTurn() // the turn in progress was cut off mid-air; nothing more of it is coming
     try {
-      message = JSON.parse(typeof event.data === 'string' ? event.data : await (event.data as Blob).text())
-    } catch {
-      return
-    }
-
-    if (message.setupComplete) {
-      ready = true
-      setState('listening')
-      // She opens the conversation herself.
-      if (options.greeting) send({ realtimeInput: { text: options.greeting } })
-      return
-    }
-
-    const content = message.serverContent
-    if (content) {
-      if (content.interrupted) dropQueuedAudio()
-      for (const part of content.modelTurn?.parts ?? []) if (part.inlineData?.data) playChunk(part.inlineData.data)
-      if (content.inputTranscription?.text) userText += content.inputTranscription.text
-      if (content.outputTranscription?.text) samairaText += content.outputTranscription.text
-      if (content.inputTranscription?.text || content.outputTranscription?.text) callbacks.onCaption?.({ user: userText.trim(), samaira: samairaText.trim() })
-      if (content.turnComplete) flushTurn()
-    }
-
-    if (message.toolCall?.functionCalls) {
-      const responses = []
-      for (const call of message.toolCall.functionCalls as { id: string; name: string; args?: Record<string, unknown> }[]) {
-        let response: Record<string, unknown>
-        try {
-          response = await callbacks.onToolCall(call.name, call.args ?? {}, userText.trim())
-        } catch {
-          response = { error: 'That could not be recorded.' }
-        }
-        responses.push({ id: call.id, name: call.name, response })
+      const next = await options.remint(resumeHandle)
+      if (stopped) return // stop() was called while remint() was in flight
+      if (!next) {
+        finish(fallbackError)
+        return
       }
-      send({ toolResponse: { functionResponses: responses } })
+      reconnecting = false
+      connect(next)
+    } catch {
+      if (!stopped) finish(fallbackError)
     }
-
-    if (message.goAway) finish('The live session reached its time limit. Start it again to continue.')
   }
+
+  function connect(sess: LiveSession) {
+    ready = false
+    const mySocket = new WebSocket(`${LIVE_WS}?access_token=${encodeURIComponent(sess.token)}`)
+    socket = mySocket
+    // A reconnect leaves the previous socket's listeners attached; without this check, a stale event arriving
+    // after `socket` has already moved on to a newer connection could fire finish()/reconnectOrFinish() again.
+    const stale = () => socket !== mySocket
+    mySocket.onopen = () => {
+      if (!stale()) send({ setup: sess.setup })
+    }
+    mySocket.onerror = () => {
+      if (!stale()) void reconnectOrFinish('The live connection failed. Please try again.')
+    }
+    mySocket.onclose = (event) => {
+      if (stopped || reconnecting || stale()) return
+      // A clean close (1000) from the server side is a deliberate, quiet end -- not a drop to reconnect from.
+      if (event.code === 1000) {
+        finish()
+        return
+      }
+      void reconnectOrFinish(event.reason || 'The live connection closed.')
+    }
+    mySocket.onmessage = async (event) => {
+      if (stopped || stale()) return
+      let message: Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+      try {
+        message = JSON.parse(typeof event.data === 'string' ? event.data : await (event.data as Blob).text())
+      } catch {
+        return
+      }
+
+      if (message.setupComplete) {
+        ready = true
+        setState('listening')
+        // She opens the conversation herself, but only the very first time -- a reconnect picks the call back up mid-flow.
+        if (firstConnection && options.greeting) send({ realtimeInput: { text: options.greeting } })
+        firstConnection = false
+        return
+      }
+
+      if (message.sessionResumptionUpdate?.resumable && message.sessionResumptionUpdate?.newHandle) {
+        resumeHandle = message.sessionResumptionUpdate.newHandle
+      }
+
+      const content = message.serverContent
+      if (content) {
+        if (content.interrupted) dropQueuedAudio()
+        for (const part of content.modelTurn?.parts ?? []) if (part.inlineData?.data) playChunk(part.inlineData.data)
+        if (content.inputTranscription?.text) userText += content.inputTranscription.text
+        if (content.outputTranscription?.text) samairaText += content.outputTranscription.text
+        if (content.inputTranscription?.text || content.outputTranscription?.text) callbacks.onCaption?.({ user: userText.trim(), samaira: samairaText.trim() })
+        if (content.turnComplete) flushTurn()
+      }
+
+      if (message.toolCall?.functionCalls) {
+        const responses = []
+        for (const call of message.toolCall.functionCalls as { id: string; name: string; args?: Record<string, unknown> }[]) {
+          let response: Record<string, unknown>
+          try {
+            response = await callbacks.onToolCall(call.name, call.args ?? {}, userText.trim())
+          } catch {
+            response = { error: 'That could not be recorded.' }
+          }
+          responses.push({ id: call.id, name: call.name, response })
+        }
+        send({ toolResponse: { functionResponses: responses } })
+      }
+
+      // The server is about to close the socket on its own terms; get ahead of it instead of waiting for onclose.
+      if (message.goAway) void reconnectOrFinish('The live session ended and could not be resumed. Start it again to continue.')
+    }
+  }
+
+  connect(session)
 
   return {
     stop: () => finish(),

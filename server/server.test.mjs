@@ -583,6 +583,14 @@ describe('live voice session (Gemini Live, mocked)', () => {
       assert.deepEqual(listTool.action.enum, ['add', 'update', 'remove'])
       assert.ok('fullName' in listTool.values.properties && 'bankName' in listTool.values.properties)
       assert.equal('idNumber' in listTool.values.properties, false)
+      // Gemini 3.8 Live defaults tool calls to NON_BLOCKING; every tool here needs its result back before the
+      // next reply (screen navigation, "applied" vs "waitingForConfirmation"), so all four pin BLOCKING.
+      assert.deepEqual(tools.map((tool) => tool.behavior), ['BLOCKING', 'BLOCKING', 'BLOCKING', 'BLOCKING'])
+      // Without compression, Google hard-disconnects an audio-only session at 15 minutes -- easy to hit on a 13-step interview.
+      assert.deepEqual(setup.contextWindowCompression, { triggerTokens: 16_000, slidingWindow: { targetTokens: 6_000 } })
+      // Present from the very first connection (JSON drops the undefined handle) so the server starts issuing
+      // resumption handles from turn one, without the client having one to offer yet.
+      assert.deepEqual(setup.sessionResumption, {})
       const instruction = setup.systemInstruction.parts[0].text
       assert.match(instruction, /Full legal name/)
       assert.match(instruction, /Rohan {2}Mehta/)
@@ -598,11 +606,18 @@ describe('live voice session (Gemini Live, mocked)', () => {
       await alice('POST', '/api/live/session', { language: '__proto__' })
       assert.match(calls[2].body.bidiGenerateContentSetup.systemInstruction.parts[0].text, /LANGUAGE: Listen for whatever language they just used/)
 
+      // A resumption handle from a dropped call is relayed straight through...
+      await alice('POST', '/api/live/session', { resumeHandle: 'abc.DEF-123' })
+      assert.deepEqual(calls[3].body.bidiGenerateContentSetup.sessionResumption, { handle: 'abc.DEF-123' })
+      // ...but only when it looks like an opaque token; anything else is dropped rather than relayed upstream.
+      await alice('POST', '/api/live/session', { resumeHandle: 'not a token; <script>' })
+      assert.deepEqual(calls[4].body.bidiGenerateContentSetup.sessionResumption, {})
+
       process.env.GEMINI_LIVE_MODEL = 'gemini-3.8-live-extended-thinking'
       process.env.GEMINI_LIVE_VOICE = 'Kore'
       await alice('POST', '/api/live/session', {})
-      assert.equal(calls[3].body.bidiGenerateContentSetup.model, 'models/gemini-3.8-live-extended-thinking')
-      assert.equal(calls[3].body.bidiGenerateContentSetup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName, 'Kore')
+      assert.equal(calls[5].body.bidiGenerateContentSetup.model, 'models/gemini-3.8-live-extended-thinking')
+      assert.equal(calls[5].body.bidiGenerateContentSetup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName, 'Kore')
 
       globalThis.fetch = async (url, init) => (String(url).startsWith('https://generativelanguage.googleapis.com') ? new Response('nope', { status: 403 }) : realFetch(url, init))
       const failed = await alice('POST', '/api/live/session', {})

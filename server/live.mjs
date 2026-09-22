@@ -53,6 +53,10 @@ function recordTool() {
     name: LIVE_TOOL_NAME,
     description:
       'Put what the person just stated into their form. Call it as soon as they clearly state a beneficiary (who gets what) or a value for a fillable field. Include only what they actually said.',
+    // Gemini 3.8 Live defaults tool calls to NON_BLOCKING (fire-and-forget); every instruction above about
+    // reacting to "applied" vs "waitingForConfirmation" assumes the result is back before the next reply, so
+    // this is pinned to BLOCKING. https://ai.google.dev/gemini-api/docs/live-api/capabilities
+    behavior: 'BLOCKING',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -98,6 +102,7 @@ function editListTool() {
   return {
     name: LIVE_EDIT_TOOL,
     description: `Add, change or remove one entry in one of the Will's lists. The change is made in their form right away. Lists and their fields:\n${catalogue}\nUse "match" (a name, or a position like "2") to say which existing entry to change or remove; adding someone already listed updates them instead of duplicating.`,
+    behavior: 'BLOCKING', // see recordTool() above
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -119,6 +124,7 @@ function undoTool() {
   return {
     name: LIVE_UNDO_TOOL,
     description: 'Take back the most recent change that was put into their form. Use it when they say undo, or say what you just recorded was wrong.',
+    behavior: 'BLOCKING', // see recordTool() above
     parameters: { type: 'OBJECT', properties: {} },
   }
 }
@@ -127,6 +133,9 @@ function navigateTool(stepIds) {
   return {
     name: LIVE_NAVIGATE_TOOL,
     description: 'Take the screen to another step of the questionnaire. Returns what is on the new screen: its fields and the questions still open there.',
+    // BLOCKING matters most here: the instructions tell her never to announce a step before she has the tool's
+    // result (the new screen), and to ask the new step's first question from that result.
+    behavior: 'BLOCKING',
     parameters: {
       type: 'OBJECT',
       properties: { stepId: { type: 'STRING', description: 'The id of the step to show.', ...(stepIds.length ? { enum: stepIds } : {}) } },
@@ -179,7 +188,22 @@ function languageRule(language) {
   return `LANGUAGE: ${rule} Whatever language you speak, everything you put into their form (names, addresses, values, list entries) is written in English letters: transliterate a name spoken in another language ("रोहन मेहता" becomes "Rohan Mehta"), and use the English option value for a select. Numbers and dates keep their formats. The screen and these tool results are in English; explain them to the person in their language.`
 }
 
-export function buildLiveSetup({ estateSnapshot, sessionContext, interviewHistory, language } = {}) {
+/** A resumption handle is an opaque token Google hands back; only its shape is checked before it is ever relayed upstream again. */
+function sanitizeResumeHandle(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 2048 && /^[\w.-]+$/.test(value) ? value : undefined
+}
+
+/**
+ * Without this, Google hard-disconnects audio-only Live sessions at 15 minutes; a 13-step estate interview
+ * routinely runs longer. Sliding-window compression trims older turns once the context gets large instead of
+ * cutting the call off — system instructions and the most recent turns are kept, only the middle is dropped.
+ * https://ai.google.dev/gemini-api/docs/live-api/best-practices
+ */
+function contextWindowCompression() {
+  return { triggerTokens: 16_000, slidingWindow: { targetTokens: 6_000 } }
+}
+
+export function buildLiveSetup({ estateSnapshot, sessionContext, interviewHistory, language, resumeHandle } = {}) {
   const context = [
     tagged('session_context', JSON.stringify(plainObject(sessionContext, SESSION_CONTEXT_LIMIT) ?? {})),
     tagged('estate_snapshot', JSON.stringify(plainObject(estateSnapshot, 60_000) ?? {})),
@@ -195,6 +219,10 @@ export function buildLiveSetup({ estateSnapshot, sessionContext, interviewHistor
     inputAudioTranscription: { languageCodes: transcriptionLanguages(language) },
     outputAudioTranscription: {},
     tools: [{ functionDeclarations: [recordTool(), editListTool(), undoTool(), navigateTool(stepIdsOf(sessionContext))] }],
+    // Present from the first connection (not just on reconnect) so the server starts issuing resumption
+    // handles from turn one; the client reconnects with the last handle it saw if the call drops.
+    sessionResumption: { handle: sanitizeResumeHandle(resumeHandle) },
+    contextWindowCompression: contextWindowCompression(),
   }
 }
 
