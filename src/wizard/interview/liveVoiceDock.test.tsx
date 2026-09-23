@@ -130,6 +130,10 @@ describe('Live voice dock', () => {
 
     vi.mocked(props.onApply).mockReturnValue(applied({ applied: 0, changes: [], problems: ['"Age" is on another step'], focus: [] }))
     expect(await callbacks.onToolCall('record_estate_details', args, '')).toMatchObject({ ok: false, problems: ['"Age" is on another step'] })
+    // The refusal is spelled out, so she tells the person instead of talking past it (measured against the live model).
+    expect(await callbacks.onToolCall('record_estate_details', args, '')).toMatchObject({ notSaved: expect.stringContaining('NOT saved') })
+    vi.mocked(props.onApply).mockReturnValue(applied())
+    expect(await callbacks.onToolCall('record_estate_details', args, '')).not.toHaveProperty('notSaved')
     expect(await callbacks.onToolCall('something_else', {}, '')).toMatchObject({ ok: false })
   })
 

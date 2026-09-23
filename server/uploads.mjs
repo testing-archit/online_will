@@ -5,6 +5,7 @@ import path from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { httpError } from './auth.mjs'
+import { isMalwareScanConfigured, scanForMalware } from './malwareScan.mjs'
 import { canRead, canWrite, getAuthorizedRecord, getRecord, upsertRecord } from './store.mjs'
 
 const SIGNED_URL_TTL_MS = 15 * 60 * 1000
@@ -20,6 +21,66 @@ const ALLOWED_MIME = [
   /^application\/vnd\.ms-excel$/,
 ]
 
+const ISO_BMFF = (buffer) => buffer.length >= 12 && buffer.subarray(4, 8).toString('latin1') === 'ftyp' // mp4/mov/heic/m4a family
+const RIFF = (marker) => (buffer) => buffer.subarray(0, 4).toString('latin1') === 'RIFF' && buffer.subarray(8, 12).toString('latin1') === marker
+const OLE_COMPOUND = (buffer) => buffer.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) // legacy .doc/.xls
+const ZIP = (buffer) => buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && [0x03, 0x05, 0x07].includes(buffer[2]) // .docx/.xlsx
+
+/**
+ * Known file signatures for the MIME types accepted above, so a renamed/disguised file (e.g. an executable saved
+ * as "photo.png") is caught before it is ever stored or served to a lawyer/advisor. A type left out of this table
+ * (plain text, or a container format too variable to fingerprint reliably) is not checked, rather than risk
+ * rejecting a legitimate upload on a guess.
+ */
+const MAGIC_SIGNATURES = {
+  'application/pdf': (buffer) => buffer.subarray(0, 4).toString('latin1') === '%PDF',
+  'image/png': (buffer) => buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  'image/jpeg': (buffer) => buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])),
+  'image/jpg': (buffer) => buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])),
+  'image/gif': (buffer) => ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('latin1')),
+  'image/webp': RIFF('WEBP'),
+  'image/tiff': (buffer) => ['II*\u0000', 'MM\u0000*'].includes(buffer.subarray(0, 4).toString('latin1')),
+  'image/tif': (buffer) => ['II*\u0000', 'MM\u0000*'].includes(buffer.subarray(0, 4).toString('latin1')),
+  'image/heic': ISO_BMFF,
+  'image/heif': ISO_BMFF,
+  'video/mp4': ISO_BMFF,
+  'video/quicktime': ISO_BMFF,
+  'audio/mp4': ISO_BMFF,
+  'audio/m4a': ISO_BMFF,
+  'audio/x-m4a': ISO_BMFF,
+  'video/webm': (buffer) => buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])),
+  'audio/webm': (buffer) => buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])),
+  'video/x-matroska': (buffer) => buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])),
+  'audio/wav': RIFF('WAVE'),
+  'audio/x-wav': RIFF('WAVE'),
+  'audio/ogg': (buffer) => buffer.subarray(0, 4).toString('latin1') === 'OggS',
+  'audio/flac': (buffer) => buffer.subarray(0, 4).toString('latin1') === 'fLaC',
+  'audio/mpeg': (buffer) => buffer.subarray(0, 3).toString('latin1') === 'ID3' || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0),
+  'audio/mp3': (buffer) => buffer.subarray(0, 3).toString('latin1') === 'ID3' || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0),
+  'application/msword': OLE_COMPOUND,
+  'application/vnd.ms-excel': OLE_COMPOUND,
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ZIP,
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ZIP,
+}
+
+/** True unless the declared MIME type has a known signature and the file's actual bytes don't match it. */
+async function contentMatchesDeclaredType(filePath, mimeType) {
+  const check = MAGIC_SIGNATURES[mimeType]
+  if (!check) return true
+  const handle = await fsp.open(filePath, 'r')
+  try {
+    const buffer = Buffer.alloc(16)
+    const { bytesRead } = await handle.read(buffer, 0, 16, 0)
+    return check(buffer.subarray(0, bytesRead))
+  } finally {
+    await handle.close()
+  }
+}
+
+// Files live on local disk, same single-instance limitation the pre-Postgres store had: fine for one machine,
+// not for a multi-instance deploy (each instance would only see its own uploads) or for scaling storage
+// independently of compute. Moving to an object store (S3, GCS, R2, ...) is a deliberate follow-up once a
+// provider is chosen -- deferred here since there are no bucket/credentials to build and test against.
 function uploadDir() {
   return path.resolve(process.cwd(), process.env.LOCAL_UPLOAD_DIR || '.local-uploads')
 }
@@ -98,11 +159,37 @@ export async function receiveUpload(uploadId, request, actor) {
     throw error
   }
 
+  const rejection = await inspectUploadedFile(finalPath, record.mimeType)
+  if (rejection) {
+    await fsp.rm(finalPath, { force: true })
+    await upsertRecord('uploads', { id: uploadId, status: 'rejected', rejectedReason: rejection }, actor)
+    throw httpError(415, rejection)
+  }
+
   return upsertRecord(
     'uploads',
     { id: uploadId, status: 'uploaded', storedBytes: received, uploadedAt: new Date().toISOString() },
     actor,
   )
+}
+
+/** Content checks run once, after the bytes are on disk: a magic-byte match against the declared type, then an
+ * antivirus scan if one is configured. Returns a rejection reason, or undefined if the file is clean. */
+async function inspectUploadedFile(filePath, mimeType) {
+  if (!(await contentMatchesDeclaredType(filePath, mimeType))) {
+    return 'File content does not match its declared type'
+  }
+  if (isMalwareScanConfigured()) {
+    // Fails closed: a scan that could not run (daemon down, network error) is treated the same as an infected result.
+    let result
+    try {
+      result = await scanForMalware(filePath)
+    } catch {
+      return 'This file could not be scanned and was rejected'
+    }
+    if (!result.clean) return 'This file was rejected by malware scanning'
+  }
+  return undefined
 }
 
 /** Read a stored upload fully into memory (only for files small enough to hand to an AI provider). */

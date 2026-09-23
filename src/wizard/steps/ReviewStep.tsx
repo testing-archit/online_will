@@ -10,6 +10,7 @@ import type { FlagSeverity, WillData } from '../../lib/types'
 import type { EstateReportType } from '../../pdf/EstateReportDocument'
 import { Callout } from '../fields'
 import { useWizardNavigation } from '../navigation'
+import { ShareLinkControl } from './ShareLinkControl'
 
 const SEVERITY_LABEL: Record<FlagSeverity, string> = {
   critical: 'Needs legal review before signing',
@@ -97,6 +98,8 @@ export function ReviewStep() {
           </motion.button>
         ))}
       </div>
+
+      <ShareLinkControl />
 
       {mandatoryIssues.length > 0 ? (
         <Callout tone="critical" title={`${mandatoryIssues.length} required answer${mandatoryIssues.length === 1 ? '' : 's'} must be completed before you can submit`}>

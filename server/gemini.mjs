@@ -37,7 +37,7 @@ export function isGeminiConfigured() {
 
 /** Models to try, in order: GEMINI_MODEL, then GEMINI_FALLBACK_MODELS (comma-separated; default the always-current flash-lite alias). */
 function modelChain() {
-  const primary = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+  const primary = process.env.GEMINI_MODEL || 'gemini-3.6-flash'
   const fallbacks = (process.env.GEMINI_FALLBACK_MODELS ?? 'gemini-flash-lite-latest').split(',').map((name) => name.trim())
   return [...new Set([primary, ...fallbacks].filter(Boolean))]
 }
@@ -209,11 +209,12 @@ export async function respondToEstateInterviewWithGemini({ message, interviewHis
   const style = REPLY_STYLE[replyLanguage]
   const text = await callGemini({
     system: [
-      'You are Samaira, an AI estate interviewer at Octaraa, an Indian Will-drafting platform.',
+      'You are Samaira, an AI estate interviewer at Octaraa, an Indian Will-drafting platform (not a law firm; drafts are reviewed by a lawyer before signing). If asked about Octaraa itself beyond that, say you are not sure and point them to the "Ask about Octaraa" chat on the site, then return to the interview.',
       'The user may write or speak in English, Hindi or Hinglish. Understand all of them.',
       style
         ? `Write assistantReply and followUpQuestion in ${style}.`
         : 'Write assistantReply and followUpQuestion in the same language and script the user used (English if unsure).',
+      'GENDER AGREEMENT: in Hindi or Hinglish, verbs and adjectives addressing the user change with their gender -- work out whether they are a man or a woman only from what they have said about themselves so far (never from their name alone), and keep that agreement consistent. If you are genuinely unsure, use the least-gendered natural phrasing rather than guessing, and never ask them their gender outright. This is only about how you address them: you (Samaira) always speak of yourself in the feminine.',
       'Write every structured field (beneficiaries) in English.',
       'Keep replies short and natural — they are read aloud. Never use markdown or lists.',
       'Sound like a warm, caring person talking, not a form being read out. The text is turned into speech by a voice that takes its tone from the words and punctuation, so write the emotion in.',
@@ -303,6 +304,42 @@ export async function answerEstateQuestionWithGemini({ question, estateSnapshot 
     prompt: [tagged('question', question), snapshotBlock(estateSnapshot)].join('\n'),
     json: false,
     temperature: 0.2,
+  })
+}
+
+/**
+ * Admin-only decision support (never approves, changes, sends or deletes anything): a plain-language synthesis
+ * of the completeness/legal flags the platform already computed deterministically client-side (this never
+ * recomputes that logic), the staff notes on the case, and an optional free-form question. Every observation is
+ * expected to point back to the specific flag/section it came from, so a human can verify it against the record.
+ */
+export async function reviewWillForAdminWithGemini({ estateSnapshot, legalFlags, completenessIssues, staffNotes, question }) {
+  return callGemini({
+    system: [
+      "You are helping an admin at an Indian Will-drafting platform review one client's case before it is finalised.",
+      'You are given completeness/legal flags the platform already computed deterministically, the redacted case data, and staff notes exchanged on the case. Never recompute or contradict the given flags -- synthesise and prioritise them for a busy reviewer.',
+      'Write a short, plain-language review: what needs attention first and why, referencing the specific flag id, section or note it came from so it can be verified against the record.',
+      'Never invent facts not present in the data provided. You are decision support only -- you cannot approve, change, send, reassign, or delete anything; say so if asked to.',
+      question ? 'The admin also asked a specific question below -- answer it directly, grounded only in the data given.' : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    prompt: [
+      tagged('legal_flags', JSON.stringify(legalFlags ?? [])),
+      tagged('completeness_issues', JSON.stringify(completenessIssues ?? [])),
+      tagged('staff_notes', JSON.stringify(staffNotes ?? [])),
+      snapshotBlock(estateSnapshot),
+      question ? tagged('admin_question', question) : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    json: false,
+    temperature: 0.2,
+    // The default INTERACTIVE_LIMITS (8s/model, 17s total) are sized for a quick interview reply the client is
+    // waiting on mid-conversation; this is a heavier one-off analysis (flags + notes + a full estate snapshot) an
+    // admin explicitly clicked "Run review" for and expects to wait a little longer on.
+    perModelMs: 30_000,
+    deadlineMs: 45_000,
   })
 }
 

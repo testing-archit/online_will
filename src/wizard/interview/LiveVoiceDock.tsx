@@ -1,6 +1,7 @@
-import { Loader2, Mic, MicOff, PhoneOff, Undo2, X } from 'lucide-react'
+import { Mic, MicOff, PhoneOff, Undo2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createLiveSessionFromApi } from '../../lib/backendClient'
+import { VoiceOrb, type OrbLevels } from '../../components/VoiceOrb'
 import { toAiSnapshot } from '../../lib/aiSnapshot'
 import { newlyAnswered, screenSignature, screenUpdateMessage, type LiveContext, type SectionStatus, type SentScreen } from '../../lib/assistantContext'
 import type { ListEdit } from '../../lib/liveEdits'
@@ -51,7 +52,13 @@ function editReply(result: LiveApplyResult, screen: LiveContext) {
   return {
     ok: result.applied > 0,
     ...(result.applied ? { applied: result.applied, changes: result.changes, note: 'It is already in their form, and lit up on their screen. They can say "undo that".' } : {}),
-    ...(result.problems.length ? { problems: result.problems } : {}),
+    ...(result.problems.length
+      ? {
+          problems: result.problems,
+          // Spelled out in the result itself: a refusal buried in a list is easy for her to talk straight past.
+          notSaved: `${result.applied ? 'Part of this was' : 'This was'} NOT saved. Tell them what did not go in, then fix it with them before moving on.`,
+        }
+      : {}),
     stillOpen: screen.openQuestions,
     lists: screen.lists,
     nextStepId: screen.nextStepId,
@@ -60,36 +67,6 @@ function editReply(result: LiveApplyResult, screen: LiveContext) {
 
 const PHASE_LABEL: Record<Phase, string> = { off: 'Ready', connecting: 'Connecting', listening: 'Listening', speaking: 'Samaira is speaking', ended: '' }
 
-/**
- * The voice. A living orb that moves with whoever is talking (your microphone when you speak, her voice when she
- * does), so it is obvious at a glance who has the floor and that she can hear you.
- */
-function VoiceOrb({ phase, level, outputLevel, muted }: { phase: Phase; level: number; outputLevel: number; muted: boolean }) {
-  const speaking = phase === 'speaking'
-  const energy = phase === 'connecting' ? 0 : speaking ? outputLevel : muted ? 0 : level
-  const core = muted
-    ? 'bg-[radial-gradient(circle_at_30%_30%,#cbd5e1,#64748b_60%,#334155)]'
-    : speaking
-      ? 'bg-[radial-gradient(circle_at_30%_30%,#ffffff,#a5b4fc_50%,#5b6cff)]'
-      : 'bg-[radial-gradient(circle_at_30%_30%,#ffc48a,#fe7f00_55%,#c25f00)]'
-  return (
-    <div className="relative flex h-[76px] w-[76px] shrink-0 items-center justify-center sm:h-[92px] sm:w-[92px]" aria-hidden>
-      {/* Halos start at the size of the orb and grow with the voice, but never past this box, so nothing is clipped. */}
-      {[1.42, 1.2].map((reach, index) => (
-        <span
-          key={reach}
-          className={`absolute h-[52px] w-[52px] rounded-full transition-transform duration-100 ease-out motion-reduce:transition-none sm:h-[62px] sm:w-[62px] ${speaking ? 'bg-indigo-300' : 'bg-brand-secondary'}`}
-          style={{ transform: `scale(${1 + energy * (reach - 1)})`, opacity: (index === 0 ? 0.18 : 0.3) * (0.3 + energy) }}
-        />
-      ))}
-      <span
-        className={`orb-core relative h-[52px] w-[52px] rounded-full shadow-[0_0_28px_rgba(254,127,0,0.45)] transition-transform duration-100 ease-out motion-reduce:transition-none sm:h-[62px] sm:w-[62px] ${core} ${phase === 'connecting' ? 'orb-connecting' : phase === 'listening' && energy < 0.06 ? 'orb-breathe' : ''}`}
-        style={{ transform: `scale(${1 + energy * 0.12})` }}
-      />
-      {phase === 'connecting' && <Loader2 className="absolute h-6 w-6 animate-spin text-white/90" />}
-    </div>
-  )
-}
 
 /**
  * Talk to Samaira, hands-free. Opened with one tap, it is a call: an orb that moves with the voices, live subtitles of
@@ -129,8 +106,8 @@ export function LiveVoiceDock({
   onClose: () => void
 }) {
   const [phase, setPhase] = useState<Phase>('off')
-  const [level, setLevel] = useState(0)
-  const [outputLevel, setOutputLevel] = useState(0)
+  // Loudness for the orb, updated every frame outside React state (see VoiceOrb).
+  const levels = useRef<OrbLevels>({ mic: 0, out: 0 })
   const [muted, setMuted] = useState(false)
   const [notice, setNotice] = useState('')
   const [caption, setCaption] = useState({ user: '', samaira: '' })
@@ -254,15 +231,18 @@ export function LiveVoiceDock({
               sendText.current = null
               interruptWith.current = null
               starting.current = false
-              setLevel(0)
-              setOutputLevel(0)
+              levels.current = { mic: 0, out: 0 }
               setPhase('off')
               // A call that ended normally closes the dock; one that failed stays open with the reason.
               if (wasStarted && !phaseNoticeRef.current) latest.current.onClose()
             } else setPhase(next)
           },
-          onLevel: setLevel,
-          onOutputLevel: setOutputLevel,
+          onLevel: (level) => {
+            levels.current.mic = level
+          },
+          onOutputLevel: (level) => {
+            levels.current.out = level
+          },
           onCaption: setCaption,
           onTurn: (turn) => {
             if (turn.user) setLastUser(turn.user)
@@ -405,7 +385,7 @@ export function LiveVoiceDock({
         )}
 
         <div className="flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5 sm:py-4">
-          <VoiceOrb phase={phase} level={level} outputLevel={outputLevel} muted={muted} />
+          <VoiceOrb phase={phase} levels={levels} muted={muted} />
 
           <div className="min-w-0 flex-1" aria-live="polite">
             {running ? (

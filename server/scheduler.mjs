@@ -1,5 +1,5 @@
 import { sendBrevoEmail, sendBrevoSms } from './brevo.mjs'
-import { listRecords, upsertRecord } from './store.mjs'
+import { claimDueJobs, upsertRecord } from './store.mjs'
 
 const MAX_ATTEMPTS = 3
 let running = false
@@ -15,20 +15,16 @@ export function startScheduler() {
 }
 
 export async function runScheduledJobs() {
-  // A slow provider must not cause overlapping runs that send the same job twice.
+  // A slow provider must not cause overlapping runs that send the same job twice within this process; claimDueJobs
+  // itself is atomic (a single locked queue task, or a single SQL statement on Postgres), so this is also safe
+  // across multiple processes/instances when DATABASE_URL is set.
   if (running) return { skipped: true }
   running = true
   try {
-    const now = Date.now()
-    const due = await listRecords(
-      'notificationJobs',
-      (job) => job.status === 'scheduled' && (!job.runAt || Date.parse(job.runAt) <= now),
-    )
+    const due = await claimDueJobs()
 
     const summary = { sent: 0, failed: 0, retrying: 0 }
     for (const job of due) {
-      // Claim the job first so a crash mid-send cannot leave it eligible for a duplicate send.
-      await upsertRecord('notificationJobs', { id: job.id, status: 'sending' }, 'scheduler')
       const attempts = (job.attempts ?? 0) + 1
       try {
         if (job.channel === 'sms') await sendBrevoSms(job.message)

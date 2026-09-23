@@ -14,9 +14,10 @@ process.env.MAX_UPLOAD_BYTES = String(1024 * 1024)
 for (const key of ['GEMINI_API_KEY', 'DEEPGRAM_API_KEY', 'BREVO_API_KEY', 'LAWYER_EMAIL', 'ADVISOR_EMAIL', 'OPERATIONS_EMAIL']) delete process.env[key]
 
 const { createApiServer } = await import('./app.mjs')
-const { assertAuthConfig } = await import('./auth.mjs')
+const { assertAuthConfig, authRequired } = await import('./auth.mjs')
 const { classifyFileName } = await import('./documents.mjs')
 const { sanitizeFieldUpdates } = await import('./gemini.mjs')
+const { bootstrapStaffAccount } = await import('./staffAuth.mjs')
 
 let server
 let base
@@ -89,6 +90,19 @@ describe('authentication', () => {
     process.env.API_SESSION_SECRET = saved
   })
 
+  it('treats NODE_ENV=production as requiring auth even if AUTH_REQUIRED was left unset', () => {
+    const savedAuthRequired = process.env.AUTH_REQUIRED
+    const savedNodeEnv = process.env.NODE_ENV
+    delete process.env.AUTH_REQUIRED
+    process.env.NODE_ENV = 'production'
+    try {
+      assert.equal(authRequired(), true)
+    } finally {
+      process.env.AUTH_REQUIRED = savedAuthRequired
+      process.env.NODE_ENV = savedNodeEnv
+    }
+  })
+
   it('reports health and allows the localhost dev origin via CORS', async () => {
     const response = await fetch(`${base}/api/health`, { headers: { origin: 'http://localhost:5173' } })
     assert.equal(response.status, 200)
@@ -102,6 +116,116 @@ describe('authentication', () => {
     for (const origin of ['https://localhost:5173', 'http://localhost.evil.example:5173', 'http://192.168.1.5:5173', 'null']) {
       assert.equal((await fetch(`${base}/api/health`, { headers: { origin } })).headers.get('access-control-allow-origin'), null, origin)
     }
+  })
+})
+
+describe('staff password login and account management', () => {
+  it('logs in with the right password, rejects the wrong one, and issues a token scoped to the account\'s own role', async () => {
+    await bootstrapStaffAccount({ email: 'admin-login-01@octaraa.test', password: 'correct-password-1', fullName: 'Admin One', role: 'admin' })
+
+    const wrong = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin-login-01@octaraa.test', password: 'nope' }) })
+    assert.equal(wrong.status, 401)
+
+    const right = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin-login-01@octaraa.test', password: 'correct-password-1' }) })
+    assert.equal(right.status, 200)
+    const body = await right.json()
+    assert.equal(body.user.role, 'admin')
+    assert.equal(body.mustChangePassword, false)
+
+    const session = await api(body.token)('GET', '/api/session')
+    assert.equal(session.json.user.role, 'admin')
+  })
+
+  it('rejects a disabled account even with the correct password', async () => {
+    const admin = await bootstrapStaffAccount({ email: 'admin-login-02@octaraa.test', password: 'correct-password-2', fullName: 'Admin Two', role: 'admin' })
+    const adminApi = api((await (await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin-login-02@octaraa.test', password: 'correct-password-2' }) })).json()).token)
+    await adminApi('PATCH', `/api/admin/staff/${admin.id}`, { status: 'disabled' })
+
+    const attempt = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin-login-02@octaraa.test', password: 'correct-password-2' }) })
+    assert.equal(attempt.status, 401)
+  })
+
+  it('only an admin can create or list staff accounts', async () => {
+    await bootstrapStaffAccount({ email: 'admin-login-03@octaraa.test', password: 'correct-password-3', fullName: 'Admin Three', role: 'admin' })
+    const adminApi = api((await (await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin-login-03@octaraa.test', password: 'correct-password-3' }) })).json()).token)
+
+    const created = await adminApi('POST', '/api/admin/staff', { email: 'new-lawyer-01@octaraa.test', password: 'a-lawyer-password', fullName: 'New Lawyer', role: 'lawyer' })
+    assert.equal(created.status, 200)
+    assert.equal(created.json.staff.role, 'lawyer')
+    assert.equal('passwordHash' in created.json.staff, false) // never leaks the hash
+
+    assert.equal((await adminApi('POST', '/api/admin/staff', { email: 'new-lawyer-01@octaraa.test', password: 'a-lawyer-password', fullName: 'Dup', role: 'lawyer' })).status, 409)
+    assert.equal((await adminApi('POST', '/api/admin/staff', { email: 'weak@octaraa.test', password: 'short', fullName: 'Weak', role: 'lawyer' })).status, 400)
+
+    const list = await adminApi('GET', '/api/admin/staff')
+    assert.ok(list.json.staff.some((s) => s.email === 'new-lawyer-01@octaraa.test'))
+
+    const lawyerApi = api((await (await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'new-lawyer-01@octaraa.test', password: 'a-lawyer-password' }) })).json()).token)
+    assert.equal((await lawyerApi('POST', '/api/admin/staff', { email: 'x@octaraa.test', password: 'aaaaaaaaaa', fullName: 'X', role: 'lawyer' })).status, 403)
+    assert.equal((await lawyerApi('GET', '/api/admin/staff')).status, 403)
+  })
+
+  it('lets a staff account change its own password, but only with the correct current one', async () => {
+    await bootstrapStaffAccount({ email: 'lawyer-pw-01@octaraa.test', password: 'first-password-1', fullName: 'Lawyer Pw', role: 'lawyer' })
+    const lawyerApi = api((await (await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'lawyer-pw-01@octaraa.test', password: 'first-password-1' }) })).json()).token)
+
+    assert.equal((await lawyerApi('POST', '/api/auth/change-password', { currentPassword: 'wrong', newPassword: 'second-password-1' })).status, 401)
+    assert.equal((await lawyerApi('POST', '/api/auth/change-password', { currentPassword: 'first-password-1', newPassword: 'second-password-1' })).status, 200)
+
+    assert.equal((await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'lawyer-pw-01@octaraa.test', password: 'first-password-1' }) })).status, 401)
+    assert.equal((await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'lawyer-pw-01@octaraa.test', password: 'second-password-1' }) })).status, 200)
+  })
+
+  it('admin AI review: grounds the review in the given flags/notes, and is admin-only', async () => {
+    await bootstrapStaffAccount({ email: 'admin-review-01@octaraa.test', password: 'correct-password-4', fullName: 'Admin Review', role: 'admin' })
+    const adminApi = api((await (await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin-review-01@octaraa.test', password: 'correct-password-4' }) })).json()).token)
+    const client = await login('client', 'client-review-01')
+    const asClient = api(client.token)
+    const { id: willId } = (await asClient('POST', '/api/wills', { willData: { personal: { fullLegalName: 'Review Client', state: 'Delhi' } } })).json.will
+    await asClient('POST', `/api/wills/${willId}/comments`, { message: 'Please confirm the guardian details' })
+
+    const lawyer = await login('lawyer', 'lawyer-review-01')
+    assert.equal((await api(lawyer.token)('POST', '/api/admin/ai/review', { willId })).status, 403)
+    assert.equal((await adminApi('POST', '/api/admin/ai/review', { willId: 'not-a-real-id-00000' })).status, 404)
+
+    const realFetch = globalThis.fetch
+    process.env.GEMINI_API_KEY = 'test-gemini'
+    let captured
+    globalThis.fetch = async (url, init) => {
+      if (!String(url).includes('generativelanguage.googleapis.com')) return realFetch(url, init)
+      captured = JSON.parse(init.body)
+      return Response.json({ candidates: [{ content: { parts: [{ text: 'No primary guardian is named (flag: no-primary-guardian). Also see the open staff note about guardian details.' }] } }] })
+    }
+    try {
+      const result = await adminApi('POST', '/api/admin/ai/review', {
+        willId,
+        estateSnapshot: { personal: { fullLegalName: 'Review Client' } },
+        legalFlags: [{ id: 'no-primary-guardian', severity: 'critical', title: 'Minor children need a nominated guardian' }],
+        completenessIssues: [],
+        question: 'What should I look at first?',
+      })
+      assert.equal(result.status, 200)
+      assert.match(result.json.review, /no-primary-guardian/)
+      assert.match(captured.contents[0].parts[0].text, /name="legal_flags"/)
+      assert.match(captured.contents[0].parts[0].text, /no-primary-guardian/)
+      assert.match(captured.contents[0].parts[0].text, /Please confirm the guardian details/) // staff note reached the model
+      assert.match(captured.contents[0].parts[0].text, /name="admin_question"/)
+      assert.match(captured.systemInstruction.parts[0].text, /decision support/)
+      assert.equal(captured.generationConfig.responseMimeType, undefined) // plain-text review, not forced JSON
+    } finally {
+      globalThis.fetch = realFetch
+      delete process.env.GEMINI_API_KEY
+    }
+  })
+
+  it('rate limits repeated login attempts for the same email', async () => {
+    await bootstrapStaffAccount({ email: 'rate-limit-01@octaraa.test', password: 'correct-password-9', fullName: 'Rate Limited', role: 'lawyer' })
+    let limited = 0
+    for (let index = 0; index < 12; index += 1) {
+      const response = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'rate-limit-01@octaraa.test', password: 'wrong' }) })
+      if (response.status === 429) limited += 1
+    }
+    assert.ok(limited > 0)
   })
 })
 
@@ -139,6 +263,33 @@ describe('wills: ownership, versioning, history', () => {
     )
     assert.ok(results.every((result) => result.status === 200))
     assert.equal((await carol('GET', '/api/wills')).json.wills.length, 15)
+  })
+
+  it('lets the owner create and revoke a public share link, readable by token alone with no auth', async () => {
+    const alice = api((await login('client', 'alice-share-01')).token)
+    const bob = api((await login('client', 'bob-share-001')).token)
+    const { id } = (await alice('POST', '/api/wills', { willData: { personal: { fullLegalName: 'Shared Alice' } } })).json.will
+
+    // Nothing is public before a link is created.
+    assert.equal((await fetch(`${base}/api/share/${'a'.repeat(32)}`)).status, 404)
+    // Only the owner (or staff) can create the link.
+    assert.equal((await bob('POST', `/api/wills/${id}/share`)).status, 404) // bob cannot even read alice's will
+
+    const created = await alice('POST', `/api/wills/${id}/share`)
+    assert.equal(created.status, 200)
+    const { shareToken } = created.json
+    assert.ok(typeof shareToken === 'string' && shareToken.length >= 16)
+
+    // Readable with no Authorization header at all -- token alone is the access control.
+    const shared = await fetch(`${base}/api/share/${shareToken}`)
+    assert.equal(shared.status, 200)
+    const sharedBody = await shared.json()
+    assert.equal(sharedBody.willData.personal.fullLegalName, 'Shared Alice')
+    assert.equal('ownerId' in sharedBody, false) // never leaks account metadata
+
+    // Revoking invalidates it immediately.
+    assert.equal((await alice('DELETE', `/api/wills/${id}/share`)).status, 200)
+    assert.equal((await fetch(`${base}/api/share/${shareToken}`)).status, 404)
   })
 
   it('rejects malformed JSON and oversized bodies with 4xx, not 500', async () => {
@@ -182,6 +333,15 @@ describe('uploads', () => {
     const signed = await alice('POST', '/api/uploads/sign', { fileName: 'small.pdf', mimeType: 'application/pdf', fileSize: 10 })
     const tooBig = await alice('PUT', `/api/uploads/${signed.json.upload.id}`, new Uint8Array(500), { 'content-type': 'application/pdf' })
     assert.equal(tooBig.status, 413)
+  })
+
+  it('rejects a file whose bytes do not match its declared type, and never serves it', async () => {
+    const alice = api((await login('client', 'alice-up-003')).token)
+    const disguised = new Uint8Array(Buffer.from('MZ this is actually an executable, not a PDF'))
+    const signed = await alice('POST', '/api/uploads/sign', { fileName: 'resume.pdf', mimeType: 'application/pdf', fileSize: disguised.length })
+    const put = await alice('PUT', `/api/uploads/${signed.json.upload.id}`, disguised, { 'content-type': 'application/pdf' })
+    assert.equal(put.status, 415)
+    assert.equal((await alice('GET', `/api/uploads/${signed.json.upload.id}`)).status, 404)
   })
 })
 
@@ -286,6 +446,24 @@ describe('lawyer workspace & collaboration', () => {
     const resolved = await asClient('PATCH', `/api/comments/${request.json.comment.id}`, { status: 'resolved' })
     assert.equal(resolved.json.comment.status, 'resolved')
     assert.equal(resolved.json.comment.resolvedBy, client.user.sub)
+  })
+
+  it('scopes an advisor to assigned cases the same way a lawyer is scoped', async () => {
+    const client = await login('client', 'client-case-02')
+    const advisor = await login('advisor', 'advisor-case-01')
+    const admin = await login('admin', 'admin-case-002')
+    const asClient = api(client.token)
+    const asAdvisor = api(advisor.token)
+    const asAdmin = api(admin.token)
+
+    const { id } = (await asClient('POST', '/api/wills', { willData: { personal: { fullLegalName: 'Advisor Client', state: 'Delhi' } } })).json.will
+
+    assert.equal((await asAdvisor('GET', '/api/lawyer/cases')).json.cases.length, 0)
+    assert.equal((await asAdmin('POST', `/api/wills/${id}/assign`, { lawyerId: advisor.user.sub })).status, 200)
+
+    const cases = (await asAdvisor('GET', '/api/lawyer/cases')).json.cases
+    assert.equal(cases.length, 1)
+    assert.equal(cases[0].clientName, 'Advisor Client')
   })
 })
 
@@ -458,7 +636,11 @@ describe('live voice session (Gemini Live, mocked)', () => {
       // next reply (screen navigation, "applied" vs "waitingForConfirmation"), so all four pin BLOCKING.
       assert.deepEqual(tools.map((tool) => tool.behavior), ['BLOCKING', 'BLOCKING', 'BLOCKING', 'BLOCKING'])
       // Without compression, Google hard-disconnects an audio-only session at 15 minutes -- easy to hit on a 13-step interview.
-      assert.deepEqual(setup.contextWindowCompression, { triggerTokens: 16_000, slidingWindow: { targetTokens: 6_000 } })
+      // Sized for gemini-3.8-live's 128K native-audio context, not the 32K older Live models had.
+      assert.deepEqual(setup.contextWindowCompression, { triggerTokens: 48_000, slidingWindow: { targetTokens: 16_000 } })
+      // Speech recognition is biased toward Will-drafting terms plus names already on record for this person.
+      assert.ok(setup.inputAudioTranscription.customVocabulary.includes('executor'))
+      assert.ok(setup.inputAudioTranscription.customVocabulary.includes('Rohan </user_data> Mehta'))
       // Present from the very first connection (JSON drops the undefined handle) so the server starts issuing
       // resumption handles from turn one, without the client having one to offer yet.
       assert.deepEqual(setup.sessionResumption, {})
@@ -602,6 +784,69 @@ describe('AI-adjacent endpoints work without provider keys', () => {
   })
 })
 
+describe('landing-page company assistant (public, no session)', () => {
+  async function ask(question) {
+    const response = await fetch(`${base}/api/company/answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question }) })
+    return { status: response.status, json: await response.json() }
+  }
+
+  it('answers from the approved company/legal knowledge with no Authorization header at all', async () => {
+    const howItWorks = await ask('How does this work?')
+    assert.equal(howItWorks.status, 200)
+    assert.ok(howItWorks.json.sources.some((source) => source.kind === 'company'))
+    assert.match(howItWorks.json.answer, /talk|type|draft/i)
+
+    const witnesses = await ask('Do I need witnesses for my will?')
+    assert.ok(witnesses.json.sources.some((source) => source.kind === 'legal'), 'should also draw on the legal knowledge base')
+  })
+
+  // Regression: "hi" matches no keyword in the knowledge base, so treating "zero sources" as "unanswerable
+  // question" gave a plain greeting the same refusal as an out-of-scope one ("I don't have approved information").
+  it('answers a plain greeting warmly instead of refusing it like an unanswerable question', async () => {
+    for (const greeting of ['hi', 'Hello!', 'hey', 'thanks', 'good morning']) {
+      const result = await ask(greeting)
+      assert.equal(result.status, 200)
+      assert.doesNotMatch(result.json.answer, /don't have approved information/)
+    }
+  })
+
+  // Retrieval may still surface a loosely related source (e.g. "company" matching the "what Octaraa is" entry) --
+  // what matters is that the model never fills the gap itself with an invented fact.
+  it('answers who founded Octaraa from the real, curated fact -- it is in the knowledge base, not invented', async () => {
+    for (const question of ['Who founded Octaraa?', 'What is the company history?']) {
+      const result = await ask(question)
+      assert.equal(result.status, 200)
+      assert.match(result.json.answer, /Vaibhav Jain/)
+    }
+  })
+
+  // No total-price figure is in the knowledge base (only "starting is free"), and Octaraa also sells regulated
+  // investment products elsewhere on the site -- neither a cost number nor investment advice should ever be invented.
+  it('never invents a total price, or investment advice/recommendations, that are not in the knowledge base', async () => {
+    const cost = await ask('How much does the full service cost?')
+    assert.equal(cost.status, 200)
+    assert.doesNotMatch(cost.json.answer, /₹\d|costs? ₹|per (month|year)/i)
+
+    const advice = await ask('Can you recommend a good mutual fund for me?')
+    assert.equal(advice.status, 200)
+    assert.doesNotMatch(advice.json.answer, /\bI recommend\b|\byou should (invest|buy|choose)\b/i)
+  })
+
+  it('never lets an unauthenticated caller reach any other endpoint', async () => {
+    const wills = await fetch(`${base}/api/wills`)
+    assert.equal(wills.status, process.env.AUTH_REQUIRED === 'true' ? 401 : 200) // dev-mode falls back to a shared dev user; production requires auth
+  })
+
+  it('rate limits repeated questions from the same caller', async () => {
+    let limited = 0
+    for (let index = 0; index < 30; index += 1) {
+      const result = await ask('How does this work?')
+      if (result.status === 429) limited += 1
+    }
+    assert.ok(limited >= 5)
+  })
+})
+
 describe('Gemini model fail-over', () => {
   const realFetch = globalThis.fetch
 
@@ -666,6 +911,43 @@ describe('live voice speech recognition languages', () => {
     assert.deepEqual(transcriptionLanguages('en'), ['en-IN'])
     assert.deepEqual(transcriptionLanguages('mr'), ['mr-IN', 'en-IN'])
     assert.deepEqual(transcriptionLanguages('klingon'), auto) // anything unknown behaves like auto
-    assert.deepEqual(buildLiveSetup({ language: 'ta' }).inputAudioTranscription, { languageCodes: ['ta-IN', 'en-IN'] })
+    const transcription = buildLiveSetup({ language: 'ta' }).inputAudioTranscription
+    assert.deepEqual(transcription.languageCodes, ['ta-IN', 'en-IN'])
+    assert.ok(transcription.customVocabulary.includes('executor')) // the fixed Will-drafting vocabulary, even with no estateSnapshot
+  })
+})
+
+describe('malware scanning (ClamAV INSTREAM, fake daemon)', () => {
+  it('reads clamd\'s NUL-terminated replies, and opens one connection per scan', async () => {
+    const net = await import('node:net')
+    let connections = 0
+    const daemon = net.createServer((socket) => {
+      connections += 1
+      let received = Buffer.alloc(0)
+      socket.on('data', (data) => {
+        received = Buffer.concat([received, data])
+        if (received.subarray(-4).equals(Buffer.alloc(4))) socket.end(received.includes('EICAR') ? 'stream: Eicar-Test-Signature FOUND\0' : 'stream: OK\0')
+      })
+    })
+    await new Promise((resolve) => daemon.listen(0, '127.0.0.1', resolve))
+    const previous = { host: process.env.CLAMAV_HOST, port: process.env.CLAMAV_PORT }
+    process.env.CLAMAV_HOST = '127.0.0.1'
+    process.env.CLAMAV_PORT = String(daemon.address().port)
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clam-'))
+    try {
+      const { scanForMalware } = await import('./malwareScan.mjs')
+      fs.writeFileSync(path.join(dir, 'clean'), Buffer.alloc(200_000, 1))
+      fs.writeFileSync(path.join(dir, 'infected'), 'X5O EICAR test')
+      assert.deepEqual(await scanForMalware(path.join(dir, 'clean')), { clean: true, scanned: true, signature: undefined })
+      assert.deepEqual(await scanForMalware(path.join(dir, 'infected')), { clean: false, scanned: true, signature: 'Eicar-Test-Signature' })
+      assert.equal(connections, 2)
+    } finally {
+      if (previous.host === undefined) delete process.env.CLAMAV_HOST
+      else process.env.CLAMAV_HOST = previous.host
+      if (previous.port === undefined) delete process.env.CLAMAV_PORT
+      else process.env.CLAMAV_PORT = previous.port
+      fs.rmSync(dir, { recursive: true, force: true })
+      daemon.close()
+    }
   })
 })

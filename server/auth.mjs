@@ -3,15 +3,16 @@ import crypto from 'node:crypto'
 const DEFAULT_DEV_SECRET = 'octaraa-local-dev-secret-change-me'
 export const ROLES = ['client', 'lawyer', 'advisor', 'operations', 'executor', 'admin']
 
+/** Production must never fall back to the shared dev-admin identity, even if AUTH_REQUIRED was left unset. */
 export function authRequired() {
-  return process.env.AUTH_REQUIRED === 'true'
+  return process.env.AUTH_REQUIRED === 'true' || process.env.NODE_ENV === 'production'
 }
 
 /** Refuse to boot in a configuration where tokens could be forged. */
 export function assertAuthConfig() {
   const secret = process.env.API_SESSION_SECRET
   const weak = !secret || secret === DEFAULT_DEV_SECRET || secret.startsWith('replace_with') || secret.length < 32
-  if ((authRequired() || process.env.NODE_ENV === 'production') && weak) {
+  if (authRequired() && weak) {
     throw new Error('API_SESSION_SECRET must be set to a random value of at least 32 characters when AUTH_REQUIRED=true or NODE_ENV=production')
   }
 }

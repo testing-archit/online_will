@@ -1,0 +1,47 @@
+{
+  "version": "octaraa-company-kb-2026.09",
+  "sources": [
+    {
+      "id": "what-is-octaraa",
+      "title": "What Octaraa is",
+      "keywords": ["what", "octaraa", "company", "platform", "who", "about", "law", "firm"],
+      "content": "Octaraa is an Indian Will-drafting platform, not a law firm. You draft your Will by talking or typing, and a qualified lawyer reviews the draft before you sign — but you should always confirm it against your own circumstances before execution."
+    },
+    {
+      "id": "how-it-works",
+      "title": "How it works",
+      "keywords": ["how", "works", "process", "steps", "start", "begin", "what", "happens"],
+      "content": "Four steps: (1) Talk or type — answer out loud or by typing, at your own pace, skip around and come back, nothing is lost. (2) Watch it fill in — what you say becomes a field in your draft, live, the moment you say it. (3) Legal review — a lawyer checks the draft against Indian succession law and flags what needs a decision. (4) Sign & register — download the final PDF, execute it with witnesses, and register it if your state requires it."
+    },
+    {
+      "id": "voice-and-language",
+      "title": "Talking to Samaira",
+      "keywords": ["samaira", "voice", "talk", "speak", "language", "hindi", "hinglish", "call"],
+      "content": "Samaira is Octaraa's voice assistant. You can talk to her in English, Hindi, Hinglish, or your own language, and your draft fills in as you speak. You can also type instead of talking, and switch between the two at any point."
+    },
+    {
+      "id": "getting-started",
+      "title": "Starting a Will",
+      "keywords": ["cost", "price", "free", "start", "account", "sign", "up", "login", "device"],
+      "content": "Starting your Will is free, and no account is needed to begin — you can pick up exactly where you left off, on any device."
+    },
+    {
+      "id": "legal-review-disclaimer",
+      "title": "Legal review, and what Octaraa is not",
+      "keywords": ["lawyer", "review", "advice", "valid", "qualified", "not", "law", "firm", "guarantee"],
+      "content": "A qualified lawyer reviews every draft against Indian succession law before you sign, and Octaraa checks your draft for common legal issues as you go (missing witnesses, exceeding what personal law allows you to bequeath, and similar). Octaraa is a drafting platform, not a law firm, and this is not a substitute for independent legal advice about your own circumstances."
+    },
+    {
+      "id": "founder-and-company",
+      "title": "Who founded Octaraa",
+      "keywords": ["founder", "founded", "ceo", "vaibhav", "jain", "who", "started", "created", "company", "history", "mission", "entity", "legal", "registered", "contact", "email", "phone", "reach"],
+      "content": "Octaraa was founded by Vaibhav Jain, its CEO, after a 20+ year corporate career at Oracle, Microsoft, VMware, SAP and Google Cloud. He began investing in 2019 and was sold a ULIP product by a commission-driven bank advisor that wasn't right for him -- the experience that led him to start Octaraa. Its mission is to bring clarity and confidence to every Indian family's financial journey through simple, trusted solutions; this Will-drafting product is part of that same mission. Octaraa is operated by DhanSamriddhi Finvest Pvt Ltd (registered office: Gurugram, Haryana). Contact: connect@octaraa.com or +91 9667708843, 9 AM to 8 PM."
+    },
+    {
+      "id": "wealth-management-boundary",
+      "title": "Octaraa's other services (wealth management)",
+      "keywords": ["mutual", "fund", "invest", "investment", "wealth", "fixed", "deposit", "fd", "portfolio", "financial", "planning", "money", "save", "savings", "stock", "amfi"],
+      "content": "Beyond Will-drafting, Octaraa (through DhanSamriddhi Finvest Pvt Ltd, an AMFI-registered mutual fund distributor) also offers family wealth management -- mutual funds, fixed deposits, portfolio review and financial planning tools -- on octaraa.com. That is a separate part of the platform: give only this one factual sentence about it, never investment advice, product recommendations or specific numbers (returns, fees, fund names), and point them to octaraa.com for that side of things rather than discussing it further here."
+    }
+  ]
+}

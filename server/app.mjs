@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import http from 'node:http'
+import { pipeline } from 'node:stream/promises'
 import { authenticate, authRequired, createSessionToken, httpError, requireRole, ROLES } from './auth.mjs'
 import {
   isValidEmail,
@@ -10,18 +11,29 @@ import {
   validateAttachment,
 } from './brevo.mjs'
 import { classifyDocumentWithFallback } from './documents.mjs'
-import { createLiveSession, isLiveConfigured } from './live.mjs'
+import { reportError } from './errors.mjs'
+import {
+  changeStaffPassword,
+  createStaffAccount,
+  findStaffByEmail,
+  listStaffAccounts,
+  setStaffStatus,
+  verifyPassword,
+} from './staffAuth.mjs'
+import { createCompanyLiveSession, createLiveSession, isLiveConfigured } from './live.mjs'
 import {
   answerEstateQuestionWithGemini,
   extractEstateIntentWithGemini,
   MAX_INLINE_BYTES,
   respondToEstateInterviewWithGemini,
+  reviewWillForAdminWithGemini,
   transcribeAudioWithGemini,
 } from './gemini.mjs'
-import { analyzeExecutionVideo, answerLegalQuestion, getKnowledgeBaseVersion, searchVaultDocuments } from './rag.mjs'
+import { analyzeExecutionVideo, answerCompanyQuestion, answerLegalQuestion, getKnowledgeBaseVersion, searchVaultDocuments } from './rag.mjs'
 import { runScheduledJobs } from './scheduler.mjs'
 import {
   canRead,
+  canWrite,
   getAuthorizedRecord,
   getRecord,
   isStaff,
@@ -50,15 +62,28 @@ const AI_ROUTES = [
   '/api/documents/search',
   '/api/legal/',
   '/api/execution/',
+  '/api/admin/ai/',
 ]
 const AI_RATE_LIMIT = { limit: 30, windowMs: 60_000 }
+const LOGIN_RATE_LIMIT = { limit: 8, windowMs: 5 * 60_000 }
+const COMPANY_LIVE_RATE_LIMIT = { limit: 5, windowMs: 10 * 60_000 }
+// A hash that never matches any real password, used when the email doesn't exist -- verifyPassword still runs the
+// same scrypt cost against it, so a login attempt takes the same time whether or not the account exists.
+const DUMMY_PASSWORD_HASH = `scrypt:${'0'.repeat(32)}:${'0'.repeat(128)}`
 const NOTIFICATION_AUDIENCES = ['client', 'advisor', 'lawyer', 'operations']
 const MAX_JOBS_PER_REQUEST = 20
 
 const rateBuckets = new Map()
+const RATE_BUCKET_MAX_AGE_MS = Math.max(AI_RATE_LIMIT.windowMs, LOGIN_RATE_LIMIT.windowMs)
+let lastRateSweep = 0
 
 function enforceRateLimit(key, { limit, windowMs }) {
   const now = Date.now()
+  // Keys are per user and per attempted login email, so they would otherwise pile up for as long as the server runs.
+  if (now - lastRateSweep > RATE_BUCKET_MAX_AGE_MS) {
+    lastRateSweep = now
+    for (const [bucketKey, times] of rateBuckets) if (now - times[times.length - 1] >= RATE_BUCKET_MAX_AGE_MS) rateBuckets.delete(bucketKey)
+  }
   const recent = (rateBuckets.get(key) ?? []).filter((time) => now - time < windowMs)
   if (recent.length >= limit) throw httpError(429, 'Too many requests — please slow down')
   recent.push(now)
@@ -94,8 +119,10 @@ export function createApiServer() {
       await route(request, response)
     } catch (error) {
       const status = error.status || 500
-      if (status >= 500 && !error.status) console.error(error)
-      sendJson(request, response, status, { error: status === 500 ? 'Internal server error' : error.message })
+      if (status >= 500 && !error.status) void reportError(error)
+      // Failing mid-response (a file download whose stream broke) can't be turned into a JSON error any more.
+      if (response.headersSent) response.destroy()
+      else sendJson(request, response, status, { error: status === 500 ? 'Internal server error' : error.message })
     }
   })
 }
@@ -135,22 +162,116 @@ async function route(request, response) {
     })
   }
 
+  if (method === 'POST' && pathname === '/api/auth/login') {
+    const body = await readJson(request)
+    requireString(body.email, 'email', 254)
+    requireString(body.password, 'password', 200)
+    // Keyed by email, not the caller's identity (there isn't one yet) -- this is the brute-force guard for staff sign-in.
+    enforceRateLimit(`login:${String(body.email).trim().toLowerCase()}`, LOGIN_RATE_LIMIT)
+    const account = await findStaffByEmail(body.email)
+    // Always runs the same scrypt cost, whether or not the account exists, so response time can't be used to enumerate emails.
+    const passwordOk = await verifyPassword(body.password, account?.passwordHash ?? DUMMY_PASSWORD_HASH)
+    if (!account || account.status !== 'active' || !passwordOk) throw httpError(401, 'Incorrect email or password')
+    return sendJson(request, response, 200, {
+      token: createSessionToken({ userId: account.id, email: account.email, role: account.role }),
+      user: { sub: account.id, email: account.email, role: account.role },
+      mustChangePassword: Boolean(account.mustChangePassword),
+    })
+  }
+
+  // Public, unauthenticated: gated only by knowing the unguessable token (24 random bytes), never by login.
+  // Deliberately returns willData only -- no ownerId, assignedTo, or other account metadata.
+  if (method === 'GET' && pathname.startsWith('/api/share/')) {
+    const token = pathname.slice('/api/share/'.length)
+    if (!/^[\w-]{16,64}$/.test(token)) throw httpError(404, 'Not found')
+    const [will] = await listRecords('wills', (candidate) => Boolean(candidate.shareToken) && candidate.shareToken === token)
+    if (!will) throw httpError(404, 'Not found')
+    return sendJson(request, response, 200, { willData: will.willData, updatedAt: will.updatedAt })
+  }
+
+  // Public, unauthenticated: the landing page's "Ask about Octaraa" widget, for a visitor who has not started a
+  // Will yet and has no session. Grounded-only (see answerCompanyQuestion) and rate limited per caller address,
+  // same spirit as the share-link route above.
+  if (method === 'POST' && pathname === '/api/company/answer') {
+    const body = await readJson(request)
+    requireString(body.question, 'question', 500)
+    return sendJson(request, response, 200, await answerCompanyQuestion(body, request.socket.remoteAddress))
+  }
+
+  // Public, unauthenticated: the same widget's voice mode. A live connection can run real audio-minute cost off
+  // one token even if the text endpoint above would not, so this is rate limited more tightly than a question is.
+  if (method === 'POST' && pathname === '/api/company/live-session') {
+    enforceRateLimit(`company-live:${request.socket.remoteAddress}`, COMPANY_LIVE_RATE_LIMIT)
+    const body = await readJson(request)
+    return sendJson(request, response, 200, { session: await createCompanyLiveSession(body) })
+  }
+
   const user = authenticate(request)
+  // Checked before any route runs, so every AI-backed endpoint (including the admin review below) is covered.
+  if (AI_ROUTES.some((prefix) => pathname.startsWith(prefix))) enforceRateLimit(`ai:${user.sub}`, AI_RATE_LIMIT)
 
   if (method === 'GET' && pathname === '/api/session') return sendJson(request, response, 200, { user })
 
-  if (AI_ROUTES.some((prefix) => pathname.startsWith(prefix))) enforceRateLimit(`ai:${user.sub}`, AI_RATE_LIMIT)
+  if (method === 'POST' && pathname === '/api/auth/change-password') {
+    // Same brute-force guard as sign-in: a stolen session must not be able to guess the current password freely.
+    enforceRateLimit(`password:${user.sub}`, LOGIN_RATE_LIMIT)
+    const body = await readJson(request)
+    const account = await findStaffByEmail(user.email)
+    if (!account || account.id !== user.sub) throw httpError(403, 'Only a staff account can change its own password')
+    requireString(body.currentPassword, 'currentPassword', 200)
+    if (!(await verifyPassword(body.currentPassword, account.passwordHash))) throw httpError(401, 'Current password is incorrect')
+    requireString(body.newPassword, 'newPassword', 200)
+    return sendJson(request, response, 200, { user: await changeStaffPassword(account.id, body.newPassword, user) })
+  }
+
+  if (pathname === '/api/admin/staff') {
+    requireRole(user, ['admin'])
+    if (method === 'GET') return sendJson(request, response, 200, { staff: await listStaffAccounts() })
+    if (method === 'POST') {
+      const body = await readJson(request)
+      requireString(body.email, 'email', 254)
+      requireString(body.password, 'password', 200)
+      requireString(body.fullName, 'fullName', 200)
+      return sendJson(request, response, 200, { staff: await createStaffAccount(body, user) })
+    }
+  }
+
+  if (pathname.startsWith('/api/admin/staff/') && method === 'PATCH') {
+    requireRole(user, ['admin'])
+    const body = await readJson(request)
+    return sendJson(request, response, 200, { staff: await setStaffStatus(pathname.slice('/api/admin/staff/'.length), body.status, user) })
+  }
+
+  if (method === 'POST' && pathname === '/api/admin/ai/review') {
+    requireRole(user, ['admin'])
+    const body = await readJson(request)
+    requireString(body.willId, 'willId', 64)
+    // Confirms the will exists and is readable by this admin (always true for admin, but keeps the same
+    // ownership-check code path as every other will-scoped route, and turns a bad id into 404 rather than a crash).
+    await getAuthorizedRecord('wills', body.willId, user)
+    const staffNotes = (await listRecords('comments', (comment) => comment.willId === body.willId)).map((comment) => ({ role: comment.senderRole, message: comment.message, status: comment.status }))
+    // The deterministic flags/issues are computed client-side (same lib the wizard and PDF reports already use) and
+    // sent as untrusted data, same as estateSnapshot -- the server never recomputes or trusts them as fact, only
+    // as material for the model to synthesise and cite back to.
+    const estateSnapshot = body.estateSnapshot && typeof body.estateSnapshot === 'object' && !Array.isArray(body.estateSnapshot) && JSON.stringify(body.estateSnapshot).length <= 60_000 ? body.estateSnapshot : {}
+    const legalFlags = Array.isArray(body.legalFlags) ? body.legalFlags.slice(0, 100) : []
+    const completenessIssues = Array.isArray(body.completenessIssues) ? body.completenessIssues.slice(0, 100) : []
+    const question = typeof body.question === 'string' ? body.question.trim().slice(0, 1_000) : undefined
+    const review = await reviewWillForAdminWithGemini({ estateSnapshot, legalFlags, completenessIssues, staffNotes, question })
+    return sendJson(request, response, 200, { review })
+  }
 
   // ------------------------------------------------------------------ wills
   if (segments[1] === 'wills') return handleWills(request, response, segments, user, method)
   if (segments[1] === 'comments') return handleComments(request, response, segments, user, method)
 
+  // Despite the path name, this is the shared case list for every assignable staff role: canRead already scopes
+  // it correctly per caller (a lawyer/advisor sees only what they're assigned, admin/operations see everything).
   if (method === 'GET' && pathname === '/api/lawyer/cases') {
-    requireRole(user, ['lawyer', 'admin', 'operations'])
-    const wills = await listRecords('wills', (will) => canRead(will, user))
-    const comments = await listRecords('comments')
+    requireRole(user, ['lawyer', 'advisor', 'admin', 'operations'])
+    const [wills, openThreads] = await Promise.all([listRecords('wills', (will) => canRead(will, user)), openThreadCounts()])
     return sendJson(request, response, 200, {
-      cases: wills.map((will) => summarizeWill(will, comments)),
+      cases: wills.map((will) => summarizeWill(will, openThreads)),
     })
   }
 
@@ -173,7 +294,8 @@ async function route(request, response) {
         'content-length': record.storedBytes,
         'content-disposition': `attachment; filename="${record.fileName.replace(/"/g, '')}"`,
       })
-      stream.pipe(response)
+      // A read error mid-download (file removed, disk fault) tears the response down instead of crashing the process.
+      await pipeline(stream, response).catch(() => response.destroy())
       return
     }
     if (method === 'DELETE') {
@@ -307,9 +429,8 @@ async function handleWills(request, response, segments, user, method) {
 
   if (!willId) {
     if (method === 'GET') {
-      const comments = await listRecords('comments')
-      const wills = await listRecords('wills', (will) => canRead(will, user))
-      return sendJson(request, response, 200, { wills: wills.map((will) => summarizeWill(will, comments)) })
+      const [wills, openThreads] = await Promise.all([listRecords('wills', (will) => canRead(will, user)), openThreadCounts()])
+      return sendJson(request, response, 200, { wills: wills.map((will) => summarizeWill(will, openThreads)) })
     }
     if (method === 'POST') {
       const body = await readJson(request)
@@ -341,7 +462,15 @@ async function handleWills(request, response, segments, user, method) {
     const will = await getAuthorizedRecord('wills', willId, user)
     const assignedTo = Array.from(new Set([...(will.assignedTo ?? []), body.lawyerId]))
     const updated = await upsertRecord('wills', { id: willId, assignedTo }, user)
-    return sendJson(request, response, 200, { will: summarizeWill(updated, []) })
+    return sendJson(request, response, 200, { will: summarizeWill(updated, new Map()) })
+  }
+
+  if (willId && sub === 'share' && (method === 'POST' || method === 'DELETE')) {
+    const will = await getAuthorizedRecord('wills', willId, user)
+    if (!canWrite(will, user)) throw httpError(403, 'Only the owner or staff can manage this will\'s share link')
+    const shareToken = method === 'POST' ? crypto.randomBytes(24).toString('base64url') : ''
+    const updated = await upsertRecord('wills', { id: willId, shareToken }, user, { skipOwnerCheck: true })
+    return sendJson(request, response, 200, { shareToken: updated.shareToken || null })
   }
 
   if (willId && sub === 'comments') {
@@ -417,7 +546,14 @@ async function lawyerCaseReferencesUpload(user, uploadId) {
   })
 }
 
-function summarizeWill(will, comments) {
+/** Open comment threads per will, counted in one pass instead of re-scanning every comment for every will. */
+async function openThreadCounts() {
+  const counts = new Map()
+  for (const comment of await listRecords('comments', (item) => item.status === 'open')) counts.set(comment.willId, (counts.get(comment.willId) ?? 0) + 1)
+  return counts
+}
+
+function summarizeWill(will, openThreads) {
   const data = will.willData ?? {}
   return {
     id: will.id,
@@ -427,7 +563,7 @@ function summarizeWill(will, comments) {
     version: will.version,
     updatedAt: will.updatedAt,
     assignedTo: will.assignedTo ?? [],
-    openThreads: comments.filter((comment) => comment.willId === will.id && comment.status === 'open').length,
+    openThreads: openThreads.get(will.id) ?? 0,
   }
 }
 

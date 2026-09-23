@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "api": "node --env-file-if-exists=.env.local server/server.mjs",
+    "create-admin": "node --env-file-if-exists=.env.local scripts/create-admin.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
@@ -16,11 +17,14 @@
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.9.0",
+    "@sentry/node": "^10.75.2",
     "framer-motion": "^13.4.0",
     "lucide-react": "^1.47.0",
+    "pg": "^8.23.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-hook-form": "^7.88.0"
+    "react-hook-form": "^7.88.0",
+    "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

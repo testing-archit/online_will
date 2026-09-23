@@ -11,12 +11,13 @@ import { pdfColors } from './theme'
 
 registerPdfFonts()
 
-export type EstateReportType = 'client' | 'advisor' | 'lawyer'
+export type EstateReportType = 'client' | 'advisor' | 'lawyer' | 'admin'
 
 const REPORT_TITLE: Record<EstateReportType, string> = {
   client: 'Client Estate Report',
   advisor: 'Advisor Estate Report',
   lawyer: 'Lawyer Brief',
+  admin: 'Admin Case Overview',
 }
 
 const coverStyles = StyleSheet.create({
@@ -55,6 +56,7 @@ export function EstateReportDocument({ data, type }: { data: WillData; type: Est
       {type === 'client' && <ClientReport data={data} planDate={planDate} />}
       {type === 'advisor' && <AdvisorReport data={data} planDate={planDate} />}
       {type === 'lawyer' && <LawyerReport data={data} planDate={planDate} />}
+      {type === 'admin' && <AdminReport data={data} planDate={planDate} />}
     </Document>
   )
 }
@@ -172,6 +174,53 @@ function LawyerReport({ data, planDate }: { data: WillData; planDate: string }) 
           <ItemTable items={profile.missingInformation} empty="No open questions detected." />
         </Section>
         <Section title="Potential Inconsistencies / Legal Flags">
+          {flags.length ? flags.map((flag) => <FlagCard key={flag.id} severity={flag.severity} title={flag.title} description={flag.description} />) : <PdfCallout tone="info">No flags detected.</PdfCallout>}
+        </Section>
+      </ReportPage>
+    </>
+  )
+}
+
+/** The most complete internal view: legal flags (like the Lawyer Brief) plus asset/document status (like the Advisor Report), for staff overseeing the case rather than drafting or advising on it directly. */
+function AdminReport({ data, planDate }: { data: WillData; planDate: string }) {
+  const profile = buildEstateProfile(data)
+  const flags = computeLegalFlags(data)
+  const counts = flagCounts(flags)
+
+  return (
+    <>
+      <ReportPage clientName={profile.clientName} planDate={planDate}>
+        <StatCardRow
+          cards={[
+            { label: 'ESTATE PREPARATION', value: `${profile.completion.overall}%`, caption: data.personal.state || 'State not captured' },
+            { label: 'LEGAL REVIEW ITEMS', value: String(counts.critical), caption: `${counts.warning} warning(s), ${counts.info} note(s)` },
+            { label: 'DOCUMENTS', value: String(profile.documents.length), variant: profile.missingInformation.length ? 'accent' : 'default' },
+          ]}
+        />
+        <Section title="Client & Family">
+          <ItemTable items={[...summaryItems(data), ...profile.familyMembers]} empty="No client data recorded." />
+        </Section>
+        <Section title="Executors & Guardians">
+          <ItemTable items={[...profile.executors, ...profile.guardians]} empty="No executors or guardians recorded." />
+        </Section>
+        <Section title="Assets, Liabilities, Insurance">
+          <ItemTable items={[...profile.assets, ...profile.liabilities, ...profile.insurance]} empty="No estate assets recorded." />
+        </Section>
+        <Section title="Distribution">
+          <ItemTable items={profile.distributionInstructions} empty="No distribution instructions recorded." />
+        </Section>
+      </ReportPage>
+      <ReportPage clientName={profile.clientName} planDate={planDate}>
+        <Section title="Document Vault">
+          <ItemTable items={profile.documents} empty="No documents uploaded or requested." />
+        </Section>
+        <Section title="Execution Status">
+          <ItemTable items={profile.executionStatus} empty="No execution details recorded." />
+        </Section>
+        <Section title="Open Items">
+          <ItemTable items={profile.missingInformation} empty="No open items detected." />
+        </Section>
+        <Section title="Legal Flags">
           {flags.length ? flags.map((flag) => <FlagCard key={flag.id} severity={flag.severity} title={flag.title} description={flag.description} />) : <PdfCallout tone="info">No flags detected.</PdfCallout>}
         </Section>
       </ReportPage>

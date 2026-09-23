@@ -102,6 +102,25 @@ export function signOut() {
   storeToken(null)
 }
 
+export interface StaffLoginResult {
+  ok: boolean
+  role?: SessionRole
+  mustChangePassword?: boolean
+  error?: string
+}
+
+/** Real credential-checked sign-in for staff (lawyer/advisor/admin) portals. */
+export async function loginWithPassword(email: string, password: string): Promise<StaffLoginResult> {
+  const result = await request<{ token: string; user: SessionUser; mustChangePassword: boolean }>('/api/auth/login', { body: { email, password } })
+  if (!result.ok) return { ok: false, error: result.error }
+  storeToken(result.data.token)
+  return { ok: true, role: result.data.user.role, mustChangePassword: result.data.mustChangePassword }
+}
+
+export async function changeOwnPassword(currentPassword: string, newPassword: string): Promise<boolean> {
+  return (await request('/api/auth/change-password', { body: { currentPassword, newPassword } })).ok
+}
+
 function tokenRole(): SessionRole | null {
   try {
     const token = readStoredToken()
@@ -361,6 +380,54 @@ export function currentServerWillId() {
   return loadServerWillRef()?.id ?? null
 }
 
+// ---------------------------------------------------- client shared-link view
+
+/** Owner (or staff) only: mints a new opaque share token, invalidating any previous one for this will. */
+export async function createShareLink(willId: string): Promise<string | null> {
+  const result = await request<{ shareToken: string | null }>(`/api/wills/${willId}/share`, { method: 'POST' })
+  return result.ok ? result.data.shareToken : null
+}
+
+export async function revokeShareLink(willId: string): Promise<boolean> {
+  return (await request(`/api/wills/${willId}/share`, { method: 'DELETE' })).ok
+}
+
+export interface SharedWillResult {
+  ok: boolean
+  willData?: WillData
+  updatedAt?: string
+}
+
+/** Public: no login, no bearer token needed -- the token itself is the access control. */
+export async function fetchSharedWill(token: string): Promise<SharedWillResult> {
+  const result = await request<{ willData: WillData; updatedAt: string }>(`/api/share/${token}`)
+  return result.ok ? { ok: true, willData: result.data.willData, updatedAt: result.data.updatedAt } : { ok: false }
+}
+
+// --------------------------------------------------- landing-page assistant
+
+export interface CompanyAnswer {
+  ok: boolean
+  answer?: string
+  error?: string
+}
+
+/** Public: no login needed -- the landing page's "Ask about Octaraa" widget, for a visitor who has not started a Will. */
+export async function askAboutOctaraa(question: string): Promise<CompanyAnswer> {
+  const result = await request<{ answer: string }>('/api/company/answer', { body: { question } })
+  return result.ok ? { ok: true, answer: result.data.answer } : { ok: false, error: result.error }
+}
+
+/**
+ * Same widget, voice mode: a single-use token for a short, unauthenticated Live conversation with Samaira, scoped
+ * to answering questions about Octaraa (no form, nothing saved). `resumeHandle` carries a prior connection's
+ * resumption handle through on a reconnect.
+ */
+export async function createCompanyLiveSessionFromApi(language = 'auto', resumeHandle?: string): Promise<LiveSessionResult> {
+  const result = await request<{ session: { token: string; setup: Record<string, unknown>; expiresAt: string } }>('/api/company/live-session', { body: { language, resumeHandle } })
+  return result.ok ? { ok: true, session: result.data?.session } : { ok: false, error: result.error }
+}
+
 // ------------------------------------------------------- consultation & mail
 
 export async function submitConsultation(consultation: ConsultationRequest, willId: string | null): Promise<boolean> {
@@ -410,9 +477,12 @@ export interface ServerComment extends CollaborationThread {
   attachment?: { uploadId: string; fileName: string }
 }
 
-export async function listLawyerCases(): Promise<CaseSummary[] | null> {
+/** Shared by both the lawyer and advisor portals -- the server scopes the list per caller role. */
+async function listAssignedCases(): Promise<CaseSummary[] | null> {
   return dataOrNull(await request<{ cases: CaseSummary[] }>('/api/lawyer/cases'))?.cases ?? null
 }
+export const listLawyerCases = listAssignedCases
+export const listAdvisorCases = listAssignedCases
 
 export async function fetchWill(willId: string): Promise<WillData | null> {
   return dataOrNull(await request<{ will: { willData: WillData } }>(`/api/wills/${willId}`))?.will.willData ?? null
@@ -428,5 +498,71 @@ export async function postComment(willId: string, message: string, kind: Collabo
 
 export async function setCommentStatus(commentId: string, status: 'open' | 'resolved'): Promise<ServerComment | null> {
   return dataOrNull(await request<{ comment: ServerComment }>(`/api/comments/${commentId}`, { method: 'PATCH', body: { status } }))?.comment ?? null
+}
+
+/** Admin/operations only: assigns a case to a lawyer or advisor account (by their staff account id). */
+export async function assignCase(willId: string, staffId: string): Promise<boolean> {
+  return (await request(`/api/wills/${willId}/assign`, { body: { lawyerId: staffId } })).ok
+}
+
+// --------------------------------------------------------------------- admin
+
+export interface StaffAccount {
+  id: string
+  email: string
+  fullName: string
+  role: SessionRole
+  status: 'active' | 'disabled'
+  mustChangePassword: boolean
+  createdAt: string
+}
+
+export async function listStaffAccounts(): Promise<StaffAccount[] | null> {
+  return dataOrNull(await request<{ staff: StaffAccount[] }>('/api/admin/staff'))?.staff ?? null
+}
+
+export async function createStaffAccount(input: { email: string; password: string; fullName: string; role: SessionRole }): Promise<{ ok: boolean; error?: string; staff?: StaffAccount }> {
+  const result = await request<{ staff: StaffAccount }>('/api/admin/staff', { body: input })
+  return result.ok ? { ok: true, staff: result.data.staff } : { ok: false, error: result.error }
+}
+
+export async function setStaffAccountStatus(id: string, status: 'active' | 'disabled'): Promise<boolean> {
+  return (await request(`/api/admin/staff/${id}`, { method: 'PATCH', body: { status } })).ok
+}
+
+export interface AuditLogEntry {
+  id: string
+  createdAt: string
+  // Older entries, from before actor identity was flattened onto the entry, may have neither -- render defensively.
+  actorId?: string
+  actorRole?: string
+  action?: string
+  collection?: string
+  recordId?: string
+  version?: number
+  summary?: string
+}
+
+export async function fetchAuditLog(limit = 200): Promise<AuditLogEntry[] | null> {
+  return dataOrNull(await request<{ auditLog: AuditLogEntry[] }>(`/api/audit-log?limit=${limit}`))?.auditLog ?? null
+}
+
+export interface AiReviewResult {
+  ok: boolean
+  review?: string
+  error?: string
+}
+
+/** Decision support only: synthesises the deterministic flags/issues (computed locally, same as the PDF reports)
+ * plus staff notes into a plain-language review the admin reads and verifies -- it never acts on the case itself. */
+export async function reviewCaseWithAi(input: {
+  willId: string
+  estateSnapshot: unknown
+  legalFlags: unknown[]
+  completenessIssues: unknown[]
+  question?: string
+}): Promise<AiReviewResult> {
+  const result = await request<{ review: string }>('/api/admin/ai/review', { body: input, timeoutMs: LONG_TIMEOUT_MS })
+  return result.ok ? { ok: true, review: result.data.review } : { ok: false, error: result.error }
 }
 

@@ -110,7 +110,8 @@ summary:focus-visible,
     opacity: 1;
   }
 }
-.orb-breathe {
+.orb-breathe,
+.orb-core[data-quiet='true'] {
   animation: orb-breathe 2.6s ease-in-out infinite;
 }
 .orb-connecting {
@@ -118,6 +119,7 @@ summary:focus-visible,
 }
 @media (prefers-reduced-motion: reduce) {
   .orb-breathe,
+  .orb-core[data-quiet='true'],
   .orb-connecting {
     animation: none;
   }

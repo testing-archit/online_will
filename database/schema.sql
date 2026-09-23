@@ -1,5 +1,11 @@
 -- Octaraa Online Wills foundation schema.
 -- PostgreSQL 15+ recommended. Historical/version tables are append-only by trigger.
+--
+-- Status: this is a normalized target model for a future data-migration project (decomposing the app's current
+-- flat willData JSON blob into these ~20 relational tables). Nothing in the application is wired to this file
+-- today. The database the app actually runs on when DATABASE_URL is set is database/store-schema.sql, via
+-- server/store.pg.mjs -- a much simpler schema that mirrors the existing per-collection JSON-document model.
+-- Treat this file as a deliberate future plan, not a description of current behaviour.
 
 create extension if not exists pgcrypto;
 
