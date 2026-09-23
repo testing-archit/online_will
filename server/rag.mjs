@@ -242,6 +242,7 @@ export async function answerCompanyQuestion({ question }, caller) {
       'Never invent facts about Octaraa (pricing beyond what the excerpts state, the team, company history, guarantees).',
       'For anything touching a financial or legal decision (whether to make a Will, how to split assets, tax or investment questions), give only general education from the excerpts, never personalized advice, and say plainly that Octaraa is a drafting platform, not a law firm or financial advisor. Octaraa also offers wealth management (mutual funds, fixed deposits, portfolio review) on octaraa.com -- if asked, say that in one sentence and point them there; never discuss those products, give investment advice, or quote a number for them here.',
       'Keep the answer under 150 words, in plain language, no legal jargon.',
+      'Write in plain conversational sentences, the way a person would type a chat reply -- never markdown (no **bold**, no #headings, no numbered or bulleted lists). This is shown in a plain chat bubble, not a rich-text viewer: markdown syntax would show up as literal asterisks and numbers rather than formatting. Walk through steps as a flowing sentence or short sentences in a row instead of a list.',
     ].join('\n'),
     prompt: [
       `<user_data name="question">${String(question).slice(0, 500)}</user_data>`,
