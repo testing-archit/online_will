@@ -103,6 +103,29 @@ describe('authentication', () => {
     }
   })
 
+  it('dev-login stays enabled in production for the client role only -- it is the anonymous wizard\'s only way to get a session, but must never mint a staff/admin one without a real password', async () => {
+    const savedNodeEnv = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+      const clientLogin = await fetch(`${base}/api/auth/dev-login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'client' }),
+      })
+      assert.equal(clientLogin.status, 200, 'the wizard must still be able to start a Will in production')
+      assert.ok((await clientLogin.json()).token)
+
+      const adminLogin = await fetch(`${base}/api/auth/dev-login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'admin' }),
+      })
+      assert.equal(adminLogin.status, 403, 'must not be a way to mint an unauthenticated admin session in production')
+    } finally {
+      process.env.NODE_ENV = savedNodeEnv
+    }
+  })
+
   it('reports health and allows the localhost dev origin via CORS', async () => {
     const response = await fetch(`${base}/api/health`, { headers: { origin: 'http://localhost:5173' } })
     assert.equal(response.status, 200)

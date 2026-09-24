@@ -66,7 +66,10 @@ function stableDevUserId() {
 let devLoginUnavailable = false
 let loginInFlight: Promise<string | null> | null = null
 
-/** Development sign-in. Disabled by the server in production, where the host app supplies the token. */
+/** Mints a session. For the `client` role (the only role real app code ever calls this with -- staff sign in for
+ * real via loginWithPassword) the server keeps this enabled even in production, since it's the anonymous wizard's
+ * only way to get a session at all ("no account needed to start"). Any other role is server-side blocked outside
+ * local dev -- this was never a real staff/admin login path, only a manual-testing convenience. */
 export async function devLogin(role: SessionRole = 'client', email?: string): Promise<string | null> {
   if (loginInFlight) return loginInFlight
   loginInFlight = (async () => {

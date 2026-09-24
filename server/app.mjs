@@ -153,12 +153,19 @@ async function route(request, response) {
   }
 
   if (method === 'POST' && pathname === '/api/auth/dev-login') {
-    if (process.env.NODE_ENV === 'production' || process.env.ALLOW_DEV_LOGIN === 'false') {
+    if (process.env.ALLOW_DEV_LOGIN === 'false') {
       throw httpError(403, 'Dev login is disabled')
     }
     const body = await readJson(request)
     const role = body.role ?? 'client'
     if (!ROLES.includes(role)) throw httpError(400, `role must be one of ${ROLES.join(', ')}`)
+    // In production this is the ONLY session-minting path the anonymous, no-account wizard has ("no account
+    // needed to start" -- there is no other client login), so it stays enabled there for the client role alone.
+    // It must never become a way to mint a staff/admin session without a real password outside dev -- that still
+    // goes through staffAuth's real login regardless of this flag.
+    if (process.env.NODE_ENV === 'production' && role !== 'client') {
+      throw httpError(403, 'Dev login can only mint a client session in production')
+    }
     const userId = /^[A-Za-z0-9_-]{6,64}$/.test(body.userId ?? '') ? body.userId : `dev-${crypto.randomUUID().slice(0, 12)}`
     const email = isValidEmail(body.email) ? body.email : `${userId}@octaraa.local`
     return sendJson(request, response, 200, {
