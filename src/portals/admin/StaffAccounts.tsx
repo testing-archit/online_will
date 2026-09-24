@@ -58,8 +58,8 @@ export function StaffAccounts() {
           )}
           {staff === 'error' && <p className="text-sm text-rose-600">Could not load staff accounts.</p>}
           {Array.isArray(staff) && (
-            <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-white">
+              <table className="w-full text-sm whitespace-nowrap">
                 <thead>
                   <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
                     <th className="px-5 py-3">Name</th>

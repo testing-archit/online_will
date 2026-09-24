@@ -45,8 +45,8 @@ export function CaseList({
       {Array.isArray(cases) && cases.length === 0 && <p className="mt-8 text-sm text-slate-500">No cases are assigned to you yet.</p>}
 
       {Array.isArray(cases) && cases.length > 0 && (
-        <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
-          <table className="w-full text-sm">
+        <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200/80 bg-white">
+          <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 <th className="px-5 py-3">Client</th>

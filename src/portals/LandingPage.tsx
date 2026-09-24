@@ -101,9 +101,9 @@ function LiveDocumentMock() {
 export function LandingPage() {
   return (
     <div className="min-h-screen bg-porcelain">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <img src="/octaraa-logo.png" alt="Octaraa" className="h-7 w-auto" />
-        <nav className="flex items-center gap-5 text-sm font-medium text-slate-600">
+      <header className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-5 sm:px-6 sm:py-6">
+        <img src="/octaraa-logo.png" alt="Octaraa" className="h-6 w-auto shrink-0 sm:h-7" />
+        <nav className="flex items-center gap-3 text-sm font-medium whitespace-nowrap text-slate-600 sm:gap-5">
           <Link href="/staff/login" className="hover:text-slate-900">
             Staff sign-in
           </Link>

@@ -41,6 +41,16 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* iOS Safari zooms the page into any focused field set below 16px; on phones, fields get 16px so it doesn't.
+   Unlayered on purpose, so it wins over the text-sm/text-xs utilities. */
+@media (max-width: 639px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 /* Lexend for titles; h3 is used for small panel headings and stays in Figtree. */
 h1,
 h2 {

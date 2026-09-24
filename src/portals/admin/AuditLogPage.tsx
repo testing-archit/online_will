@@ -36,8 +36,8 @@ export function AuditLogPage() {
       )}
       {entries === 'error' && <p className="mt-8 text-sm text-rose-600">Could not load the audit log.</p>}
       {Array.isArray(entries) && (
-        <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200/80 bg-white">
-          <table className="w-full text-sm">
+        <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200/80 bg-white">
+          <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 <th className="px-5 py-3">When</th>
