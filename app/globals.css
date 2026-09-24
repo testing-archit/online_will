@@ -1,0 +1,136 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Figtree', sans-serif;
+  --font-display: 'Lexend', sans-serif;
+
+  --color-brand-primary: #050c6c;
+  --color-brand-primary-hover: #0a1690;
+  /* Brand orange is an accent: progress, the current-step rule and outlines. Filled actions are navy. */
+  --color-brand-secondary: #fe7f00;
+  --color-brand-secondary-hover: #e57200;
+  /* Same hue, dark enough for small text on white (4.9:1); use instead of brand-secondary for text and icons. */
+  --color-brand-secondary-ink: #b35600;
+  --color-porcelain: #f4f5f8;
+
+  /* Tighter corners read as stationery rather than app chrome. */
+  --radius-lg: 0.375rem;
+  --radius-xl: 0.5rem;
+  --radius-2xl: 0.625rem;
+  --radius-3xl: 0.875rem;
+
+  --shadow-card: 0 1px 0 rgba(5, 12, 108, 0.04), 0 28px 48px -36px rgba(5, 12, 108, 0.28);
+  --shadow-card-hover: 0 1px 0 rgba(5, 12, 108, 0.05), 0 20px 36px -28px rgba(5, 12, 108, 0.34);
+}
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+body {
+  margin: 0;
+  background: var(--color-porcelain);
+  color: #0f172a;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Lexend for titles; h3 is used for small panel headings and stays in Figtree. */
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.card-shadow {
+  box-shadow: var(--shadow-card);
+}
+.card-shadow-hover:hover {
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* Live voice: the screen mirrors the conversation. */
+@keyframes live-flash {
+  0% {
+    background-color: rgb(254 127 0 / 0.28);
+    box-shadow: 0 0 0 6px rgb(254 127 0 / 0.28);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+.live-flash {
+  border-radius: 0.75rem;
+  animation: live-flash 2.4s ease-out;
+}
+.live-focus {
+  border-radius: 0.75rem;
+  outline: 2px solid var(--color-brand-secondary);
+  outline-offset: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-flash {
+    animation: none;
+    background-color: rgb(254 127 0 / 0.16);
+  }
+}
+
+/* Live voice orb. */
+@keyframes orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+@keyframes orb-connecting {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.orb-breathe,
+.orb-core[data-quiet='true'] {
+  animation: orb-breathe 2.6s ease-in-out infinite;
+}
+.orb-connecting {
+  animation: orb-connecting 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .orb-breathe,
+  .orb-core[data-quiet='true'],
+  .orb-connecting {
+    animation: none;
+  }
+}
+
+/* Live voice: the page reserves room for the voice dock, and highlighted fields scroll clear of it and of the header. */
+body {
+  padding-bottom: var(--live-dock-h, 0px);
+}
+.live-flash,
+.live-focus {
+  scroll-margin-top: 96px;
+  scroll-margin-bottom: calc(var(--live-dock-h, 0px) + 24px);
+}

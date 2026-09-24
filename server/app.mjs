@@ -113,18 +113,23 @@ function isLocalDevOrigin(origin) {
   }
 }
 
+// Exported so the Next.js adapter (app/api/[...path]/route.ts) can drive the exact same routing/error-handling
+// logic through a Node http.IncomingMessage/ServerResponse-shaped shim, instead of a real socket -- this function,
+// and everything it calls, is the single source of truth for API behavior regardless of which process hosts it.
+export async function handleRequest(request, response) {
+  try {
+    await route(request, response)
+  } catch (error) {
+    const status = error.status || 500
+    if (status >= 500 && !error.status) void reportError(error)
+    // Failing mid-response (a file download whose stream broke) can't be turned into a JSON error any more.
+    if (response.headersSent) response.destroy()
+    else sendJson(request, response, status, { error: status === 500 ? 'Internal server error' : error.message })
+  }
+}
+
 export function createApiServer() {
-  return http.createServer(async (request, response) => {
-    try {
-      await route(request, response)
-    } catch (error) {
-      const status = error.status || 500
-      if (status >= 500 && !error.status) void reportError(error)
-      // Failing mid-response (a file download whose stream broke) can't be turned into a JSON error any more.
-      if (response.headersSent) response.destroy()
-      else sendJson(request, response, status, { error: status === 500 ? 'Internal server error' : error.message })
-    }
-  })
+  return http.createServer(handleRequest)
 }
 
 async function route(request, response) {

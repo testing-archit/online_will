@@ -1,7 +1,8 @@
+'use client'
+
 import { Download, Loader2 } from 'lucide-react'
+import { useParams } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
-import { useParams } from 'react-router-dom'
-import octaraaLogo from '../../assets/octaraa-logo.png'
 import { fetchSharedWill } from '../../lib/backendClient'
 import { buildEstateProfile, type EstateProfile } from '../../lib/estateProfile'
 import type { WillData } from '../../lib/types'
@@ -13,7 +14,8 @@ function CenteredMessage({ children }: { children: ReactNode }) {
 
 /** Public, read-only view for whoever holds the share link -- no login, and no editing. */
 export function SharedPortalPage() {
-  const { token = '' } = useParams()
+  const params = useParams<{ token: string }>()
+  const token = params.token ?? ''
   const [data, setData] = useState<WillData | 'loading' | 'error'>('loading')
   const [downloading, setDownloading] = useState(false)
 
@@ -39,7 +41,7 @@ export function SharedPortalPage() {
     return (
       <CenteredMessage>
         <div>
-          <img src={octaraaLogo} alt="Octaraa" className="mx-auto mb-4 h-6 w-auto" />
+          <img src="/octaraa-logo.png" alt="Octaraa" className="mx-auto mb-4 h-6 w-auto" />
           <p className="text-sm text-slate-500">This link is invalid or has been revoked. Ask for a new one.</p>
         </div>
       </CenteredMessage>
@@ -52,7 +54,7 @@ export function SharedPortalPage() {
     <div className="min-h-screen bg-porcelain px-4 py-10">
       <div className="mx-auto max-w-3xl">
         <div className="mb-8 flex items-center justify-between gap-3">
-          <img src={octaraaLogo} alt="Octaraa" className="h-7 w-auto" />
+          <img src="/octaraa-logo.png" alt="Octaraa" className="h-7 w-auto" />
           <button
             type="button"
             disabled={downloading}

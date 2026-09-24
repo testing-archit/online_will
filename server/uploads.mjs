@@ -82,7 +82,7 @@ async function contentMatchesDeclaredType(filePath, mimeType) {
 // independently of compute. Moving to an object store (S3, GCS, R2, ...) is a deliberate follow-up once a
 // provider is chosen -- deferred here since there are no bucket/credentials to build and test against.
 function uploadDir() {
-  return path.resolve(process.cwd(), process.env.LOCAL_UPLOAD_DIR || '.local-uploads')
+  return path.resolve(/*turbopackIgnore: true*/ process.cwd(), process.env.LOCAL_UPLOAD_DIR || '.local-uploads')
 }
 
 export function maxUploadBytes() {
@@ -99,7 +99,7 @@ export function isAllowedMimeType(mimeType) {
 }
 
 function filePathFor(uploadId) {
-  return path.join(uploadDir(), uploadId)
+  return path.join(/*turbopackIgnore: true*/ uploadDir(), uploadId)
 }
 
 export async function createSignedUpload({ fileName, mimeType, fileSize, documentType }, actor) {

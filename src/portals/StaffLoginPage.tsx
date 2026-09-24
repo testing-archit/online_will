@@ -1,15 +1,16 @@
+'use client'
+
 import { Loader2, LogIn } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useState, type FormEvent } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
-import octaraaLogo from '../assets/octaraa-logo.png'
 import { loginWithPassword, type SessionRole } from '../lib/backendClient'
 import { Field, TextInput } from '../wizard/fields'
 
 const PORTAL_PATH: Partial<Record<SessionRole, string>> = { lawyer: '/lawyer', advisor: '/advisor', admin: '/admin' }
 
 export function StaffLoginPage() {
-  const navigate = useNavigate()
-  const location = useLocation()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -32,15 +33,15 @@ export function StaffLoginPage() {
       setComingSoonRole(result.role)
       return
     }
-    const from = (location.state as { from?: string } | null)?.from
-    navigate(from && from.startsWith(target) ? from : target, { replace: true })
+    const from = searchParams.get('from')
+    router.replace(from && from.startsWith(target) ? from : target)
   }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-porcelain px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3">
-          <img src={octaraaLogo} alt="Octaraa" className="h-8 w-auto" />
+          <img src="/octaraa-logo.png" alt="Octaraa" className="h-8 w-auto" />
           <h1 className="font-display text-lg text-slate-900">Staff sign-in</h1>
         </div>
         <form onSubmit={submit} className="card-shadow flex flex-col gap-4 rounded-2xl border border-slate-200/80 bg-white p-6">

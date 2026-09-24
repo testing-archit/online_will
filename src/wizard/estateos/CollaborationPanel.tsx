@@ -69,7 +69,7 @@ export function CollaborationPanel() {
       ) : (
         <ClientThread />
       )}
-      {import.meta.env.DEV && <DevRoleSwitch session={session} onChange={refreshSession} />}
+      {process.env.NODE_ENV === 'development' && <DevRoleSwitch session={session} onChange={refreshSession} />}
     </OsPanel>
   )
 }

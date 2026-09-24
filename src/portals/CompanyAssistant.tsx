@@ -1,3 +1,5 @@
+'use client'
+
 import { Loader2, Mic, MessageCircle, PhoneOff, Send, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { askAboutOctaraa, createCompanyLiveSessionFromApi } from '../lib/backendClient'

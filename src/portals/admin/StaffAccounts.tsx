@@ -1,3 +1,5 @@
+'use client'
+
 import { Loader2, UserPlus } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { createStaffAccount, listStaffAccounts, setStaffAccountStatus, type SessionRole, type StaffAccount } from '../../lib/backendClient'

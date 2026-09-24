@@ -1,8 +1,9 @@
+'use client'
+
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import { ArrowLeft, Check, CloudOff, Loader2, RotateCcw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FormProvider, useForm, useFormContext, type FieldPath } from 'react-hook-form'
-import octaraaLogo from '../assets/octaraa-logo.png'
 import { appendAuditEntries, diffWillSections } from '../lib/auditTrail'
 import { defaultWillData } from '../lib/defaultData'
 import { fingerprint } from '../lib/id'
@@ -279,7 +280,7 @@ function Masthead({ progress, syncState, onStartOver }: { progress: number; sync
   return (
     <div className="relative z-40 border-b border-slate-200 bg-white/95 backdrop-blur lg:sticky lg:top-0">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3.5 sm:px-6">
-        <img src={octaraaLogo} alt="Octaraa — Family Wealth Simplified" className="h-9 w-auto" />
+        <img src="/octaraa-logo.png" alt="Octaraa — Family Wealth Simplified" className="h-9 w-auto" />
         <div className="flex items-center gap-x-5 text-sm text-slate-500">
           <p className="hidden items-center gap-1.5 sm:flex" aria-live="polite">
             {syncState === 'saving' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

@@ -12,7 +12,7 @@ const HISTORY_LIMIT_PER_RECORD = 50
 const ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/
 
 function dataDir() {
-  return path.resolve(process.cwd(), process.env.LOCAL_DATA_DIR || '.local-data')
+  return path.resolve(/*turbopackIgnore: true*/ process.cwd(), process.env.LOCAL_DATA_DIR || '.local-data')
 }
 
 function dataPath() {

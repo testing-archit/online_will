@@ -1,10 +1,24 @@
+'use client'
+
 import { Loader2 } from 'lucide-react'
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import type { CaseSummary } from '../../lib/backendClient'
 
-/** One case-list page, shared by every staff portal -- only the data source, title and subtitle differ. */
-export function CaseList({ fetchCases, title = 'Assigned cases', subtitle }: { fetchCases: () => Promise<CaseSummary[] | null>; title?: string; subtitle: string }) {
+/** One case-list page, shared by every staff portal -- only the data source, title and subtitle differ.
+ * `basePath` (e.g. "/lawyer") makes the per-case links absolute -- Next's Link, unlike react-router's, resolves
+ * a relative href against the current URL the way a plain <a> would, not against the matched route segment. */
+export function CaseList({
+  fetchCases,
+  basePath,
+  title = 'Assigned cases',
+  subtitle,
+}: {
+  fetchCases: () => Promise<CaseSummary[] | null>
+  basePath: string
+  title?: string
+  subtitle: string
+}) {
   const [cases, setCases] = useState<CaseSummary[] | 'loading' | 'error'>('loading')
 
   useEffect(() => {
@@ -46,7 +60,7 @@ export function CaseList({ fetchCases, title = 'Assigned cases', subtitle }: { f
               {cases.map((item) => (
                 <tr key={item.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
                   <td className="px-5 py-3">
-                    <Link to={`cases/${item.id}`} className="font-medium text-brand-primary hover:underline">
+                    <Link href={`${basePath}/cases/${item.id}`} className="font-medium text-brand-primary hover:underline">
                       {item.clientName}
                     </Link>
                   </td>

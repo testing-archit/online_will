@@ -1,8 +1,9 @@
+'use client'
+
 import { motion } from 'framer-motion'
 import { ArrowRight } from 'lucide-react'
+import Link from 'next/link'
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import octaraaLogo from '../assets/octaraa-logo.png'
 
 // Loads only once the landing page itself has rendered, and never blocks it: the chat widget is a nice-to-have,
 // not part of the first thing a visitor sees.
@@ -101,12 +102,12 @@ export function LandingPage() {
   return (
     <div className="min-h-screen bg-porcelain">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <img src={octaraaLogo} alt="Octaraa" className="h-7 w-auto" />
+        <img src="/octaraa-logo.png" alt="Octaraa" className="h-7 w-auto" />
         <nav className="flex items-center gap-5 text-sm font-medium text-slate-600">
-          <Link to="/staff/login" className="hover:text-slate-900">
+          <Link href="/staff/login" className="hover:text-slate-900">
             Staff sign-in
           </Link>
-          <Link to="/start" className="rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-primary-hover">
+          <Link href="/start" className="rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-primary-hover">
             Start your Will
           </Link>
         </nav>
@@ -121,7 +122,7 @@ export function LandingPage() {
             </p>
             <div className="mt-8 flex flex-col items-start gap-3">
               <Link
-                to="/start"
+                href="/start"
                 className="flex items-center gap-2 rounded-xl bg-brand-secondary px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-black/20 transition hover:bg-brand-secondary-hover active:translate-y-px"
               >
                 Start your Will for free

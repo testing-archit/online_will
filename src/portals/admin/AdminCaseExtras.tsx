@@ -1,3 +1,5 @@
+'use client'
+
 import { Loader2, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toAiSnapshot } from '../../lib/aiSnapshot'

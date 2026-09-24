@@ -1,6 +1,9 @@
+'use client'
+
 import { ArrowLeft, Download, Loader2, Send } from 'lucide-react'
+import Link from 'next/link'
+import { useParams } from 'next/navigation'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
 import { fetchWill, listComments, postComment, setCommentStatus, type ServerComment } from '../../lib/backendClient'
 import { buildEstateProfile, type EstateProfile } from '../../lib/estateProfile'
 import type { EstateReportType } from '../../pdf/EstateReportDocument'
@@ -17,7 +20,8 @@ const REPORT_BUTTON_LABEL: Record<EstateReportType, string> = {
 /** One case-detail page, shared by every staff portal -- only the report type, "back to list" link, and an
  * optional extra sidebar panel (the admin portal's reassignment + AI review) differ. */
 export function CaseDetail({ backPath, reportType, extraPanel }: { backPath: string; reportType: EstateReportType; extraPanel?: (data: WillData, willId: string) => ReactNode }) {
-  const { willId = '' } = useParams()
+  const params = useParams<{ willId: string }>()
+  const willId = params.willId ?? ''
   const [loaded, setLoaded] = useState<{ willId: string; data: WillData | 'error' }>()
   const data = loaded?.willId === willId ? loaded.data : 'loading'
   const [comments, setComments] = useState<ServerComment[]>([])
@@ -69,7 +73,7 @@ export function CaseDetail({ backPath, reportType, extraPanel }: { backPath: str
 
   return (
     <div>
-      <Link to={backPath} className="mb-4 flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
+      <Link href={backPath} className="mb-4 flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
         <ArrowLeft className="h-3.5 w-3.5" /> All cases
       </Link>
 

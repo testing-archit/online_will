@@ -1,6 +1,5 @@
 import { Image, Page, StyleSheet, Text, View } from '@react-pdf/renderer'
 import type { ReactNode } from 'react'
-import octaraaLogo from '../assets/octaraa-logo.png'
 import type { FlagSeverity } from '../lib/types'
 import { pdfColors } from './theme'
 
@@ -55,7 +54,7 @@ export function ReportPage({
     <Page size="A4" style={styles.page} wrap>
       <View style={styles.headerFixed} fixed>
         <View style={styles.headerRow}>
-          <Image src={octaraaLogo} style={styles.logoImg} />
+          <Image src="/octaraa-logo.png" style={styles.logoImg} />
           <View style={styles.headerRight}>
             <Text style={styles.headerClient}>{clientName || 'Draft Will'}</Text>
             <Text
@@ -75,7 +74,7 @@ export function ReportPage({
         <View style={styles.footerDivider} />
         <View style={styles.footerRow}>
           <View style={styles.footerLeft}>
-            <Image src={octaraaLogo} style={styles.footerLogo} />
+            <Image src="/octaraa-logo.png" style={styles.footerLogo} />
             <Text style={styles.footerText}>Octaraa — Strictly Confidential</Text>
           </View>
           <Text style={styles.footerText}>Draft only — not a substitute for a signed, witnessed original</Text>

@@ -1,6 +1,5 @@
 import { listAssets } from '../lib/assetMapping'
 import { Document, Image, Page, StyleSheet, Text, View } from '@react-pdf/renderer'
-import octaraaLogo from '../assets/octaraa-logo.png'
 import { computeAge } from '../lib/age'
 import { formatAddress, generateDraftText } from '../lib/draftText'
 import {
@@ -61,7 +60,7 @@ function CoverPage({ testatorName, date }: { testatorName: string; date: string 
     <Page size="A4" style={coverStyles.page}>
       <View style={coverStyles.center}>
         <View style={coverStyles.logoCard}>
-          <Image src={octaraaLogo} style={coverStyles.logoImg} />
+          <Image src="/octaraa-logo.png" style={coverStyles.logoImg} />
         </View>
         <View style={coverStyles.hr} />
         <Text style={coverStyles.title}>Last Will & Testament{'\n'}Draft for Legal Review</Text>

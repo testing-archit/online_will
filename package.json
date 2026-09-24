@@ -4,13 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "api": "node --env-file-if-exists=.env.local server/server.mjs",
+    "dev": "next dev",
     "create-admin": "node --env-file-if-exists=.env.local scripts/create-admin.mjs",
-    "build": "tsc -b && vite build",
+    "build": "next build && cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/",
     "lint": "oxlint",
-    "preview": "vite preview",
-    "start": "vite preview",
+    "start": "node --env-file-if-exists=.env.local .next/standalone/server.js",
     "test": "npm run test:client && npm run test:server",
     "test:client": "vitest run",
     "test:server": "node --test server/server.test.mjs"
@@ -18,8 +16,10 @@
   "dependencies": {
     "@react-pdf/renderer": "^4.9.0",
     "@sentry/node": "^10.75.2",
+    "@tailwindcss/postcss": "^4.3.3",
     "framer-motion": "^13.4.0",
     "lucide-react": "^1.47.0",
+    "next": "^16.3.6",
     "pg": "^8.23.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -27,11 +27,9 @@
     "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
-    "@vitejs/plugin-react": "^6.1.1",
     "autoprefixer": "^10.6.1",
     "jsdom": "^29.1.1",
     "oxlint": "^1.81.0",

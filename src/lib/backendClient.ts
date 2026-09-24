@@ -13,16 +13,9 @@ import type {
   WillData,
 } from './types'
 
-// The API lives on the same host as the app unless configured, so raw-IP and
-// LAN deployments work without rebuilding. On localhost we use the IPv4 loopback
-// the API server binds to.
-function defaultApiBase() {
-  const { protocol, hostname } = window.location
-  const host = hostname === 'localhost' || hostname === '::1' ? '127.0.0.1' : hostname
-  return `${protocol === 'https:' ? 'https:' : 'http:'}//${host}:8787`
-}
-
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) || defaultApiBase()
+// Frontend and API are one Next.js app/process now (see app/api/[...path]/route.ts), so every request is
+// same-origin -- a relative path is all that's ever needed, no configured base URL.
+const API_BASE = ''
 const AUTH_TOKEN_KEY = 'octaraa-api-session-token'
 const DEV_USER_KEY = 'octaraa-dev-user-id'
 const DEFAULT_TIMEOUT_MS = 20_000
