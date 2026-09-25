@@ -80,9 +80,33 @@ export function CompanyAssistant() {
   const pendingEndCall = useRef(false)
   const endCallFallback = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const inCall = callPhase !== 'off'
+  // Phones get a full-screen sheet sized to the visual viewport, so the on-screen keyboard shrinks the sheet
+  // (keeping the input in view) instead of covering it; null means the floating desktop card.
+  const [sheet, setSheet] = useState<{ top: number; height: number } | null>(null)
 
   useEffect(() => {
-    if (open && !inCall) inputRef.current?.focus()
+    if (!open) return
+    const phone = window.matchMedia?.('(max-width: 639px)')
+    if (!phone?.matches) return
+    const viewport = window.visualViewport
+    const fit = () => setSheet({ top: viewport?.offsetTop ?? 0, height: viewport?.height ?? window.innerHeight })
+    fit()
+    viewport?.addEventListener('resize', fit)
+    viewport?.addEventListener('scroll', fit)
+    // The page underneath would otherwise scroll along with the chat.
+    const overflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      viewport?.removeEventListener('resize', fit)
+      viewport?.removeEventListener('scroll', fit)
+      document.body.style.overflow = overflow
+      setSheet(null)
+    }
+  }, [open])
+
+  useEffect(() => {
+    // On a phone, focusing would raise the keyboard over the greeting and suggestions before they're even read.
+    if (open && !inCall && !window.matchMedia?.('(max-width: 639px)').matches) inputRef.current?.focus()
     // Only on open/call-end, not on every keystroke -- inCall is read, not depended on, deliberately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, inCall])
@@ -228,12 +252,13 @@ export function CompanyAssistant() {
       {open && (
         <section
           aria-label="Ask about Octaraa"
-          className="mb-3 flex h-[28rem] w-[calc(100vw-2rem)] max-w-sm flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-black/20"
+          style={sheet ? { top: sheet.top, height: sheet.height } : undefined}
+          className="fixed inset-x-0 top-0 z-50 flex h-dvh flex-col overflow-hidden bg-white sm:static sm:mb-3 sm:h-[28rem] sm:w-[calc(100vw-2rem)] sm:max-w-sm sm:rounded-2xl sm:border sm:border-slate-200 sm:shadow-2xl sm:shadow-black/20"
         >
-          <header className="flex items-center justify-between bg-brand-primary px-4 py-3">
-            <p className="text-sm font-semibold text-white">Ask about Octaraa</p>
-            <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="rounded-full p-1 text-white/80 transition hover:bg-white/15 hover:text-white">
-              <X className="h-4 w-4" />
+          <header className="flex shrink-0 items-center justify-between bg-brand-primary py-2 pr-2 pl-4 sm:py-3 sm:pr-4">
+            <p className="text-base font-semibold text-white sm:text-sm">Ask about Octaraa</p>
+            <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="rounded-full p-2.5 text-white/80 transition hover:bg-white/15 hover:text-white sm:p-1">
+              <X className="h-5 w-5 sm:h-4 sm:w-4" />
             </button>
           </header>
 
@@ -268,7 +293,7 @@ export function CompanyAssistant() {
                     key={suggestion}
                     type="button"
                     onClick={() => void ask(suggestion)}
-                    className="rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-brand-secondary hover:text-brand-primary"
+                    className="rounded-full border border-slate-200 px-3 py-2 text-sm font-medium sm:px-2.5 sm:py-1 sm:text-xs text-slate-600 transition hover:border-brand-secondary hover:text-brand-primary"
                   >
                     {suggestion}
                   </button>
@@ -288,7 +313,7 @@ export function CompanyAssistant() {
 
           {inCall ? (
             // Fixed, never scrolls away -- the orb and phase stay visible the whole call, whatever the transcript is doing.
-            <div className="flex items-center justify-between gap-2 border-t border-slate-200 p-3" data-testid="voice-call">
+            <div className="flex shrink-0 items-center justify-between gap-2 border-t border-slate-200 p-3" data-testid="voice-call">
               <div className="flex min-w-0 items-center gap-2">
                 <VoiceOrb phase={callPhase} levels={callLevels} muted={false} size="sm" />
                 <p className="truncate text-xs font-medium text-slate-500">{phaseLabel || 'On a call with Samaira'}</p>
@@ -303,7 +328,7 @@ export function CompanyAssistant() {
                 event.preventDefault()
                 void ask(question)
               }}
-              className="flex items-center gap-2 border-t border-slate-200 p-3"
+              className="flex shrink-0 items-center gap-2 border-t border-slate-200 p-3"
             >
               {isLiveSupported() && (
                 // The moment a call starts, callPhase leaves 'off' and this whole form (this button included) is
@@ -314,7 +339,7 @@ export function CompanyAssistant() {
                   onClick={() => void startCall()}
                   aria-label="Talk instead of typing"
                   title="Talk instead of typing"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-brand-secondary hover:text-brand-primary"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 sm:h-9 sm:w-9 text-slate-500 transition hover:border-brand-secondary hover:text-brand-primary"
                 >
                   <Mic className="h-4 w-4" />
                 </button>
@@ -326,13 +351,13 @@ export function CompanyAssistant() {
                 placeholder="Ask a question…"
                 maxLength={500}
                 aria-label="Your question about Octaraa"
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-secondary"
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-800 sm:py-2 outline-none focus:border-brand-secondary"
               />
               <button
                 type="submit"
                 disabled={!question.trim() || pending}
                 aria-label="Ask"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-primary text-white transition hover:bg-brand-primary-hover disabled:opacity-40"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand-primary sm:h-9 sm:w-9 text-white transition hover:bg-brand-primary-hover disabled:opacity-40"
               >
                 <Send className="h-4 w-4" />
               </button>
@@ -351,7 +376,7 @@ export function CompanyAssistant() {
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-label={open ? 'Close the Octaraa assistant' : 'Ask about Octaraa'}
-        className="ml-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-secondary text-white shadow-lg shadow-black/20 transition hover:bg-brand-secondary-hover"
+        className={`ml-auto ${open ? 'hidden sm:flex' : 'flex'} h-14 w-14 items-center justify-center rounded-full bg-brand-secondary text-white shadow-lg shadow-black/20 transition hover:bg-brand-secondary-hover`}
       >
         {open ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
       </button>
